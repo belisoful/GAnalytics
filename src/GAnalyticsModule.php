@@ -24,7 +24,7 @@ use Prado\Util\TPluginModule;
  * </code>
  *
  * @author Brad Anderson <belisoful@icloud.com>
- * @since 0.1.0a1
+ * @since 0.0.1
  */
 
 class GAnalyticsModule extends TPluginModule

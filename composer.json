@@ -1,0 +1,30 @@
+{
+	"name": "belisoful/GAnalytics",
+	"version": "v0.0.1",
+	"version_normalized": "0.0.1",
+	"description": "PRADO Plugin for Google Analytics",
+	"license": "BSD-3-Clause",
+	"type": "prado4-extension",
+	"keywords": [ "prado", "google", "analytics", "API", "metrics", "traffic", "extension"],
+	"homepage": "https://github.com/belisoful/GAnalytics",
+	"authors": [
+		{
+			"name": "Brad Anderson",
+			"email": "belisoful@icloud.com",
+			"role": "Software Architect",
+			"homepage": "https://github.com/belisoful"
+		}
+	],
+	"notification-url": "https://packagist.org/downloads/",
+	"autoload": {
+		"psr-4": {
+			"belisoful\\GAnalytics\\": "src"
+		}
+	},
+	"require": {
+		"pradosoft/prado" : ">=4.2.0"
+	},
+	"extra": {
+		"bootstrap": "belisoful\\GAnalytics\\GAnalyticsModule"
+	}
+}

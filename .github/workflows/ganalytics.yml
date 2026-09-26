@@ -1,0 +1,67 @@
+name: PRADO Google Analytics Extension
+on: [push, pull_request]
+jobs:
+  composerext:
+    name: GAnalytics (PHP ${{ matrix.php-versions }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php-versions: ['8.1', '8.2', '8.3', '8.4', '8.5']
+
+    defaults:
+      run:
+        working-directory: ganalytics
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v5
+        with:
+          path: ganalytics
+
+      - name: Checkout PRADO framework (4.4 dev)
+        uses: actions/checkout@v5
+        with:
+          repository: pradosoft/prado
+          ref: master
+          path: prado
+
+      - name: Setup PHP, with composer and extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-versions }}
+          extensions: ctype, dom, intl, json, mbstring, pcre, spl
+          tools: php-cs-fixer, phpstan, cs2pr
+
+      - name: Validate composer.json and composer.lock
+        run: composer validate --strict
+
+      - name: Validate code syntax using php-cs-fixer (src)
+        run: php-cs-fixer check src -vvv --using-cache=no --format=checkstyle | cs2pr
+
+      - name: Validate code syntax using php-cs-fixer (tests)
+        run: php-cs-fixer check tests -vvv --using-cache=no --format=checkstyle | cs2pr
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php${{ matrix.php-versions }}-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-php${{ matrix.php-versions }}-composer-
+
+      - name: Register the sibling PRADO 4.4 checkout as a Composer path repository
+        run: composer config repositories.prado '{"type":"path","url":"../prado","options":{"symlink":true,"versions":{"pradosoft/prado":"4.4.0"}}}'
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Validate code using phpstan
+        run: phpstan analyse --error-format=checkstyle | cs2pr
+
+      - name: Run Unit Tests
+        run: composer unittest

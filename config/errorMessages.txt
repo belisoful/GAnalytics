@@ -1,0 +1,4 @@
+
+ganalytics_measurementid_invalid		= Google tag Measurement ID '{0}' is not valid; expected a tag id such as 'G-XXXXXXXXXX'.
+ganalytics_tagurl_invalid				= Google tag script URL '{0}' is not an absolute http or https URL.
+ganalytics_options_invalid				= Google tag {0} must be an array or a JSON object; '{1}' is neither.

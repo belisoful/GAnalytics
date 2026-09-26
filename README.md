@@ -1,6 +1,12 @@
 # PRADO Google Analytics Extension
 
-Google Analytics 4 for the [PRADO PHP Framework](https://github.com/pradosoft/prado) (version 4.4+), implemented as a PRADO 4 extension. `GAnalyticsModule` registers the Google tag (`gtag.js`) in the head of every page the page service runs, so each page view is measured under your Measurement ID. The tag is configured from the application configuration, an application parameter, or both.
+Google Analytics 4 for the [PRADO PHP Framework](https://github.com/pradosoft/prado) (version 4.4+), implemented as a PRADO 4 extension. `GAnalyticsModule` registers the Google tag (`gtag.js`) in the head of every page the page service runs, so each page view is measured under your Measurement ID. The tag is configured from the application configuration, an application parameter, or both. Page code sends events through the module or straight from the page (`$this->trackEvent(…)`), on full pages and on ActiveControl callbacks alike; PHP code without a browser sends them over the Measurement Protocol; and the module keeps a PRADO Content Security Policy working with the tag.
+
+| Class | Role |
+|---|---|
+| `GAnalyticsModule` | The module: registers the tag on every page, queues and delivers `gtag()` calls, derives the `user_id`, amends the CSP, and fronts the Measurement Protocol |
+| `GAnalyticsPageBehavior` | A class behavior on `TPage` giving pages `trackEvent()`, `updateConsent()`, `setUserProperties()`, `gtag()` and `getGAnalytics()` |
+| `GAnalyticsMeasurementProtocol` | The server-side client: posts up to 25 events for one client id to Google, with PRADO's clock as the timestamp |
 
 ## Requirements
 
@@ -85,16 +91,82 @@ Both are registered on the page's `TClientScriptManager` under the key `gtag` (`
 | `SendPageView` | `true` | `false` sets `send_page_view: false`, for applications that send their own `page_view` events |
 | `ConfigOptions` | none | Further `gtag('config')` parameters (`user_id`, `cookie_domain`, `cookie_flags`, `allow_google_signals`, …) as an array, or a JSON object in XML |
 | `ConsentDefaults` | none | Consent Mode defaults, emitted as `gtag('consent', 'default', …)` before the configuration |
+| `AdditionalMeasurementIds` | none | Further tags configured on the page with a plain `gtag('config')`, such as a Google Ads `AW-` id; a list or a comma-separated string |
+| `EnabledModes` | none (all) | The `TApplicationMode` names the tag is registered in, such as `Normal, Performance`, to keep development traffic out of the property |
+| `PagePathAsContentGroup` | `false` | `true` reports the PRADO page path (`Admin.Users`) as the GA4 `content_group`, so reports group by page |
+| `UserId` | none | The GA4 `user_id` for the request, set by application code; an application-defined stable id, never personal data |
+| `UserIdFromUser` | `false` | `true` derives `user_id` from the authenticated PRADO user: the HMAC-SHA256 of the user name under the security manager's validation key, stable per user and per application, so no name reaches Google; a guest has none |
 | `TagUrl` | `https://www.googletagmanager.com/gtag/js` | The script host, for first-party or server-side tagging; must be an absolute http(s) URL |
+| `DataLayerName` | `dataLayer` | The data layer variable, for a page whose `dataLayer` another tag owns; passed to the script as `l` |
+| `AttachPageBehavior` | `true` | Attaches `GAnalyticsPageBehavior` to `TPage` (see [Events from pages](#events-from-pages)) |
+| `AmendCsp` | `true` | Adds Google's hosts to the application's Content Security Policy (see [Content Security Policy](#content-security-policy)) |
+| `ApiSecret` | none | The data stream's Measurement Protocol API secret (see [Events from PHP](#events-from-php-measurement-protocol)) |
 
 ```xml
 <module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" SendPageView="false"
+    AdditionalMeasurementIds="AW-123456789" EnabledModes="Normal, Performance"
+    PagePathAsContentGroup="true" UserIdFromUser="true"
     ConfigOptions='{"cookie_domain": "example.com", "allow_google_signals": false}'
     ConsentDefaults='{"ad_storage": "denied", "ad_user_data": "denied", "ad_personalization": "denied", "analytics_storage": "denied", "wait_for_update": 500}'
     TagUrl="https://metrics.example.com/gtag/js" />
 ```
 
-Every value is JavaScript-encoded on output (`TJavaScript::encode`), so an id or option value cannot break out of the script.
+Every value is JavaScript-encoded on output (`TJavaScript::encode`), so an id or option value cannot break out of the script. PRADO's per-request CSP nonce, when `THttpHeaderCsp` sets one, is emitted on the tag's `<script>` elements by `TJavaScript`.
+
+## Events from pages
+
+The module queues `gtag()` calls for the page and delivers them at `TPage::onPreRenderComplete`, after the tag is registered, so the same code works on a full page and on an ActiveControl callback:
+
+| Request | Delivery |
+|---|---|
+| Full page (GET or postback) | One `<script>` block at the end of the form: `gtag("event", "sign_up", {...});` |
+| Callback (ActiveControls) | Each call runs through the page's callback client as `gtag(...)`, no page load |
+| No page registered yet, or after the page's calls were delivered, or `$deferred = true` | Kept in the session and delivered on the next page |
+
+```php
+$module = $this->getApplication()->getModule('belisoful/ganalytics');
+$module->trackEvent('sign_up', ['method' => 'form']);           // this page (or this callback)
+$module->trackEvent('login', ['method' => 'form'], true);        // the next page, after $this->getResponse()->redirect(...)
+$module->updateConsent(['analytics_storage' => 'granted']);      // gtag('consent', 'update', {...})
+$module->setUserProperties(['plan' => 'pro']);                   // gtag('set', 'user_properties', {...})
+$module->gtag('event', 'tutorial_begin');                        // any gtag() call
+```
+
+With `AttachPageBehavior` (the default) the module attaches `GAnalyticsPageBehavior` to `TPage` as a class behavior, so every page and every control's `getPage()` offers the same methods, and `getGAnalytics()` returns the module:
+
+```php
+class Checkout extends TPage
+{
+    public function orderPlaced($sender, $param)      // an ActiveButton callback
+    {
+        $this->trackEvent('purchase', ['value' => 9.99, 'currency' => 'USD', 'transaction_id' => $orderId]);
+    }
+
+    public function loggedIn()
+    {
+        $this->trackEvent('login', ['method' => 'form'], true);
+        $this->getResponse()->redirect($this->getService()->constructUrl('Home'));
+    }
+}
+```
+
+Event names follow GA4: a letter, then up to 39 letters, digits or underscores; an invalid name is refused (`ganalytics_event_name_invalid`). Deferred calls need the application session; without one they are dropped and a notice is logged. A call made during rendering, after the page's calls were delivered, is deferred to the next page.
+
+## Events from PHP (Measurement Protocol)
+
+An event without a browser (a shell command, a cron job, an API request, a server-side conversion) goes to Google over the Measurement Protocol. Create an API secret under the data stream's "Measurement Protocol API secrets" and set `ApiSecret`:
+
+```php
+$module->sendEvent('refund', ['transaction_id' => $orderId, 'value' => 9.99, 'currency' => 'USD']);
+```
+
+`sendEvent()` uses the visitor's client id from the request's `_ga` cookie when there is one (`getClientId()`), or a new one; the `user_id` is the module's effective user id (`UserId`, or the derived one). It returns whether Google accepted the request; a refused or failed request is logged at warning level. With `DebugMode` the request goes to Google's validation endpoint, which accepts nothing and answers with validation messages, logged as warnings.
+
+`getMeasurementProtocol()` returns the `GAnalyticsMeasurementProtocol` client for batches: `send($clientId, $events, $userId, $extra)` posts up to 25 events with `timestamp_micros` from PRADO's clock (`TApplicationClockAwareTrait`, so a `TMockClock` dates them in tests), and `Endpoint`, `DebugEndpoint` and `Timeout` are properties. The transport is a `file_get_contents()` over an `http` stream context; override `post()` for another one.
+
+## Content Security Policy
+
+With `AmendCsp` (the default) the module adds the hosts the tag needs to every `THttpHeaderCsp` of every `THttpHeadersManager` in the application when it hooks the application: `https://*.googletagmanager.com` to `script-src`, and the `google-analytics.com`, `analytics.google.com` and `googletagmanager.com` wildcards to `connect-src` and `img-src`, plus the `TagUrl` origin when it is not a Google host. A directive is amended when it exists, or created from `default-src` when only that exists, so the browser's fallback stays in force; a policy that restricts neither is left alone. The module's `getCspSources()` lists the hosts, and `amendCspHeader($csp)` amends one header for a policy the module cannot see.
 
 ### Skipping the tag for a page
 
@@ -113,7 +185,7 @@ public static function skipPrivatePages($module, TEventParameter $param)
 }
 ```
 
-`registerPageScripts($page)` returns whether the tag was registered, and `getTagScriptUrl()` and `getTagScript()` return the script URL and the inline block, for a page or control that renders them itself.
+`registerPageScripts($page)` returns whether the tag was registered, and `getTagScriptUrl()` and `getTagScript($page)` return the script URL and the inline block, for a page or control that renders them itself. `getIsActive()` tells whether `Enabled` and `EnabledModes` allow the tag in this request.
 
 ## Development
 

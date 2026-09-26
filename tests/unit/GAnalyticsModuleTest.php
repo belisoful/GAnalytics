@@ -3,14 +3,23 @@
 namespace belisoful\GAnalytics\Test\Unit;
 
 use belisoful\GAnalytics\GAnalyticsModule;
+use belisoful\GAnalytics\GAnalyticsPageBehavior;
 use PHPUnit\Framework\TestCase;
+use Prado\Exceptions\TConfigurationException;
 use Prado\Exceptions\TInvalidDataValueException;
 use Prado\Prado;
 use Prado\TApplication;
+use Prado\TApplicationMode;
+use Prado\TComponent;
 use Prado\TEventParameter;
-use Prado\Util\TPluginModule;
-use Prado\Web\Services\TPageService;
 use Prado\TService;
+use Prado\Util\TPluginModule;
+use Prado\Web\HttpHeaders\TCspDirective;
+use Prado\Web\HttpHeaders\THttpHeaderCsp;
+use Prado\Web\HttpHeaders\THttpHeadersManager;
+use Prado\Web\Services\TPageService;
+use Prado\Web\THttpCookie;
+use Prado\Web\UI\ActiveControls\TCallbackClientScript;
 use Prado\Web\UI\TPage;
 use Prado\Web\UI\WebControls\THead;
 
@@ -23,12 +32,25 @@ class InitializedTestApplication extends TApplication
 	}
 }
 
-/** A page that reports a callback request, to prove the form fallback leaves callbacks alone. */
+/** A page that reports a callback request, with one callback client the test can inspect. */
 class CallbackPage extends TPage
 {
+	public TCallbackClientScript $client;
+
+	public function __construct()
+	{
+		$this->client = new TCallbackClientScript();
+		parent::__construct();
+	}
+
 	public function getIsCallback()
 	{
 		return true;
+	}
+
+	public function getCallbackClient()
+	{
+		return $this->client;
 	}
 }
 
@@ -56,10 +78,13 @@ class GAnalyticsModuleTest extends TestCase
 
 	private ?\Prado\IService $_previousService = null;
 
+	private string $_previousMode;
+
 	protected function setUp(): void
 	{
 		$this->_app = Prado::getApplication();
 		$this->_previousService = $this->_app->getService();
+		$this->_previousMode = (string) $this->_app->getMode();
 		// A page resolves its client script manager class through the running page service.
 		$this->_app->setService(new TPageService());
 		$this->_app->getParameters()->remove(GAnalyticsModule::MEASUREMENT_ID_PARAMETER);
@@ -70,9 +95,23 @@ class GAnalyticsModuleTest extends TestCase
 		$this->_app->getParameters()->remove(GAnalyticsModule::MEASUREMENT_ID_PARAMETER);
 		$this->_app->getParameters()->remove('OtherParameter');
 		$this->_app->setService($this->_previousService);
+		$this->_app->setMode($this->_previousMode);
+		$this->_app->setUser(new FakeUser());
+		TComponent::detachClassBehavior(GAnalyticsModule::PAGE_BEHAVIOR_NAME, TPage::class);
 		if (Prado::getApplication() !== $this->_app) {
 			Prado::setApplication($this->_app);
 		}
+	}
+
+	private function probe(?string $id = self::ID): ProbeGAnalyticsModule
+	{
+		$module = new ProbeGAnalyticsModule();
+		$module->setAttachPageBehavior(false);
+		$module->setAmendCsp(false);
+		if ($id !== null) {
+			$module->setMeasurementId($id);
+		}
+		return $module;
 	}
 
 	private function module(?string $id = self::ID): GAnalyticsModule
@@ -103,6 +142,450 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame([], $module->getEffectiveConfigOptions());
 		self::assertSame(GAnalyticsModule::DEFAULT_TAG_URL, $module->getTagUrl());
 		self::assertSame('https://www.googletagmanager.com/gtag/js', $module->getTagUrl());
+		self::assertSame([], $module->getAdditionalMeasurementIds());
+		self::assertSame([], $module->getEnabledModes());
+		self::assertTrue($module->getIsActive());
+		self::assertFalse($module->getPagePathAsContentGroup());
+		self::assertNull($module->getUserId());
+		self::assertFalse($module->getUserIdFromUser());
+		self::assertNull($module->getEffectiveUserId());
+		self::assertSame('dataLayer', $module->getDataLayerName());
+		self::assertTrue($module->getAttachPageBehavior());
+		self::assertTrue($module->getAmendCsp());
+		self::assertNull($module->getApiSecret());
+		self::assertNull($module->getPageBehavior());
+		self::assertSame([], $module->getQueuedCalls());
+	}
+
+	public function testAdditionalMeasurementIdsAcceptListsAndConfigureMoreTags()
+	{
+		$module = $this->module();
+		$module->setAdditionalMeasurementIds('AW-123456789, DC-1234567,, AW-123456789');
+		self::assertSame(['AW-123456789', 'DC-1234567'], $module->getAdditionalMeasurementIds());
+		self::assertStringEndsWith(
+			"gtag('config', \"G-TEST1234AB\");\ngtag('config', \"AW-123456789\");\ngtag('config', \"DC-1234567\");",
+			$module->getTagScript()
+		);
+		$module->setAdditionalMeasurementIds(['G-SECOND1234']);
+		self::assertSame(['G-SECOND1234'], $module->getAdditionalMeasurementIds());
+		$module->setAdditionalMeasurementIds('');
+		self::assertSame([], $module->getAdditionalMeasurementIds());
+		$this->expectException(TInvalidDataValueException::class);
+		$module->setAdditionalMeasurementIds('AW-1, nope');
+	}
+
+	public function testDataLayerNameChangesTheUrlAndTheSnippet()
+	{
+		$module = $this->module();
+		$module->setDataLayerName('siteData');
+		self::assertSame('siteData', $module->getDataLayerName());
+		self::assertSame('https://www.googletagmanager.com/gtag/js?id=G-TEST1234AB&l=siteData', $module->getTagScriptUrl());
+		self::assertStringStartsWith("window.siteData = window.siteData || [];\nfunction gtag(){siteData.push(arguments);}\n", $module->getTagScript());
+		$module->setDataLayerName('');
+		self::assertSame('dataLayer', $module->getDataLayerName());
+		self::assertStringNotContainsString('&l=', $module->getTagScriptUrl());
+		$module->setDataLayerName('_$ok9');
+		self::assertSame('_$ok9', $module->getDataLayerName());
+	}
+
+	/** @return array<string, array{0: string}> */
+	public static function invalidDataLayerNames(): array
+	{
+		return [
+			'digit first' => ['9layer'],
+			'dash' => ['data-layer'],
+			'space' => ['data layer'],
+			'dot' => ['window.dataLayer'],
+			'bracket' => ['dataLayer[0]'],
+		];
+	}
+
+	/** @dataProvider invalidDataLayerNames */
+	public function testDataLayerNameRefusesNonIdentifiers(string $name)
+	{
+		$this->expectException(TInvalidDataValueException::class);
+		$this->module()->setDataLayerName($name);
+	}
+
+	public function testEnabledModesGateTheTag()
+	{
+		$module = $this->module();
+		$module->setEnabledModes('Normal, Performance,, Normal');
+		self::assertSame([TApplicationMode::Normal, TApplicationMode::Performance], $module->getEnabledModes());
+		$this->_app->setMode(TApplicationMode::Debug);
+		self::assertFalse($module->getIsActive());
+		self::assertFalse($module->registerPageScripts(new TPage()));
+		$this->_app->setMode(TApplicationMode::Normal);
+		self::assertTrue($module->getIsActive());
+		self::assertTrue($module->registerPageScripts(new TPage()));
+		$module->setEnabled(false);
+		self::assertFalse($module->getIsActive(), 'Enabled still gates.');
+		$module->setEnabled(true);
+		$module->setEnabledModes([]);
+		$this->_app->setMode(TApplicationMode::Debug);
+		self::assertTrue($module->getIsActive(), 'No modes means every mode.');
+		$this->expectException(TInvalidDataValueException::class);
+		$module->setEnabledModes('Production');
+	}
+
+	public function testPagePathIsReportedAsTheContentGroup()
+	{
+		$module = $this->module();
+		$page = new TPage();
+		$page->setPagePath('Admin.Users');
+		self::assertSame([], $module->getEffectiveConfigOptions($page), 'Off by default.');
+		$module->setPagePathAsContentGroup('true');
+		self::assertSame(['content_group' => 'Admin.Users'], $module->getEffectiveConfigOptions($page));
+		self::assertSame([], $module->getEffectiveConfigOptions(), 'No page, no group.');
+		self::assertStringContainsString("gtag('config', \"G-TEST1234AB\", {'content_group':\"Admin.Users\"});", $module->getTagScript($page));
+		$module->registerPageScripts($page);
+		self::assertTrue($page->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+	}
+
+	public function testUserIdComesFromThePropertyOrTheAuthenticatedUser()
+	{
+		$module = $this->module();
+		$this->_app->getSecurityManager()->setValidationKey('validation-key');
+		$this->_app->setUser(new FakeUser('alice', false));
+		self::assertNull($module->getEffectiveUserId(), 'Off by default.');
+
+		$module->setUserIdFromUser(true);
+		$expected = hash_hmac('sha256', 'alice', 'validation-key');
+		self::assertSame($expected, $module->getEffectiveUserId());
+		self::assertSame(['user_id' => $expected], $module->getEffectiveConfigOptions());
+		self::assertStringNotContainsString('alice', $module->getTagScript(), 'The name never reaches the page.');
+
+		$this->_app->setUser(new FakeUser('guest', true));
+		self::assertNull($module->getEffectiveUserId(), 'A guest has no user id.');
+		$this->_app->setUser(new FakeUser('', false));
+		self::assertNull($module->getEffectiveUserId(), 'An unnamed user has no user id.');
+
+		$module->setUserId(' customer-42 ');
+		self::assertSame('customer-42', $module->getUserId());
+		self::assertSame('customer-42', $module->getEffectiveUserId(), 'The explicit id wins.');
+		$module->setUserId('');
+		self::assertNull($module->getUserId());
+	}
+
+	// =========================================================================
+	// Calls
+	// =========================================================================
+
+	public function testCallsQueuedForThePageAreWrittenAtTheEndOfTheForm()
+	{
+		$module = $this->probe();
+		$page = new TPage();
+		self::assertTrue($module->registerPageScripts($page));
+		$module->trackEvent('sign_up', ['method' => 'form']);
+		$module->updateConsent(['analytics_storage' => 'granted']);
+		$module->setUserProperties(['plan' => 'pro']);
+		$module->gtag('event', 'tutorial_begin');
+		$module->gtag('set', ['currency' => 'USD']);
+		self::assertCount(5, $module->getQueuedCalls());
+		self::assertSame([], $module->deferred());
+
+		$module->preRenderCompleteHandler($page, null);
+		$cs = $page->getClientScript();
+		self::assertTrue($cs->isEndScriptRegistered(GAnalyticsModule::CALLS_SCRIPT_KEY));
+		self::assertSame([], $module->getQueuedCalls());
+		self::assertSame(
+			"gtag(\"event\", \"sign_up\", {'method':\"form\"});\n"
+			. "gtag(\"consent\", \"update\", {'analytics_storage':\"granted\"});\n"
+			. "gtag(\"set\", \"user_properties\", {'plan':\"pro\"});\n"
+			. "gtag(\"event\", \"tutorial_begin\");\n"
+			. "gtag(\"set\", {'currency':\"USD\"});",
+			$module->getCallsScript([
+				['event', 'sign_up', ['method' => 'form']],
+				['consent', 'update', ['analytics_storage' => 'granted']],
+				['set', 'user_properties', ['plan' => 'pro']],
+				['event', 'tutorial_begin'],
+				['set', ['currency' => 'USD']],
+			])
+		);
+
+		$module->trackEvent('late_event');
+		self::assertSame([['event', 'late_event']], $module->deferred(), 'A call after delivery goes to the next page.');
+		self::assertSame([], $module->getQueuedCalls());
+	}
+
+	public function testCallsWithoutAPageAreDeferredAndDeliveredOnTheNextPage()
+	{
+		$module = $this->probe();
+		$module->trackEvent('login', ['method' => 'form']);
+		$module->trackEvent('purchase', [], true);
+		self::assertSame([['event', 'login', ['method' => 'form']], ['event', 'purchase']], $module->deferred());
+		self::assertSame([], $module->getQueuedCalls());
+
+		$page = new TPage();
+		$module->registerPageScripts($page);
+		$module->trackEvent('page_event');
+		self::assertSame(3, $module->flushCalls($page));
+		self::assertSame([], $module->deferred(), 'The store is emptied.');
+		self::assertTrue($page->getClientScript()->isEndScriptRegistered(GAnalyticsModule::CALLS_SCRIPT_KEY));
+		self::assertSame(0, $module->flushCalls($page), 'Nothing is delivered twice.');
+	}
+
+	public function testDeferredCallsAppendToTheStore()
+	{
+		$module = $this->probe();
+		$module->store[GAnalyticsModule::SESSION_KEY] = [['event', 'earlier']];
+		$module->trackEvent('later', [], true);
+		self::assertSame([['event', 'earlier'], ['event', 'later']], $module->deferred());
+		$module->store[GAnalyticsModule::SESSION_KEY] = 'corrupt';
+		$module->trackEvent('after_corrupt', [], true);
+		self::assertSame([['event', 'after_corrupt']], $module->deferred(), 'A corrupt store entry is replaced.');
+		$module->store[GAnalyticsModule::SESSION_KEY] = 'corrupt';
+		$page = new TPage();
+		$module->registerPageScripts($page);
+		self::assertSame(0, $module->flushCalls($page), 'A corrupt store entry delivers nothing.');
+		self::assertSame([], $module->deferred());
+	}
+
+	public function testWithoutASessionDeferredCallsAreDropped()
+	{
+		$module = $this->probe();
+		$module->store = null;
+		$module->trackEvent('lost', [], true);
+		self::assertSame([], $module->deferred());
+		$page = new TPage();
+		$module->registerPageScripts($page);
+		self::assertSame(0, $module->flushCalls($page));
+	}
+
+	public function testCallbackRequestsDeliverCallsThroughTheCallbackClient()
+	{
+		$module = $this->probe();
+		$page = new CallbackPage();
+		self::assertTrue($module->registerPageScripts($page));
+		$module->trackEvent('add_to_cart', ['value' => 9.99]);
+		$module->updateConsent(['ad_storage' => 'granted']);
+		$module->preRenderCompleteHandler($page, null);
+		self::assertSame([
+			['gtag' => ['event', 'add_to_cart', ['value' => 9.99]]],
+			['gtag' => ['consent', 'update', ['ad_storage' => 'granted']]],
+		], $page->client->getClientFunctionsToExecute());
+		$cs = $page->getClientScript();
+		self::assertFalse($cs->isEndScriptRegistered(GAnalyticsModule::CALLS_SCRIPT_KEY));
+		self::assertFalse($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY), 'The form fallback leaves a callback alone.');
+	}
+
+	/** @return array<string, array{0: array<int, mixed>}> */
+	public static function invalidCalls(): array
+	{
+		return [
+			'no arguments' => [[]],
+			'empty command' => [['', 'x']],
+			'blank command' => [[' ']],
+			'array command' => [[['event'], 'x']],
+			'integer command' => [[1, 'x']],
+		];
+	}
+
+	/** @dataProvider invalidCalls */
+	public function testQueueCallRefusesACallWithoutACommand(array $args)
+	{
+		$this->expectException(TInvalidDataValueException::class);
+		$this->probe()->queueCall($args);
+	}
+
+	/** @return array<string, array{0: string}> */
+	public static function invalidEventNames(): array
+	{
+		return [
+			'digit first' => ['1login'],
+			'dash' => ['sign-up'],
+			'space' => ['sign up'],
+			'too long' => [str_repeat('a', 41)],
+			'empty' => [''],
+		];
+	}
+
+	/** @dataProvider invalidEventNames */
+	public function testTrackEventRefusesAnInvalidName(string $name)
+	{
+		self::assertFalse(GAnalyticsModule::isEventName($name));
+		$this->expectException(TInvalidDataValueException::class);
+		$this->probe()->trackEvent($name);
+	}
+
+	public function testEventNames()
+	{
+		self::assertTrue(GAnalyticsModule::isEventName('login'));
+		self::assertTrue(GAnalyticsModule::isEventName('Sign_Up2'));
+		self::assertTrue(GAnalyticsModule::isEventName(str_repeat('a', 40)));
+	}
+
+	// =========================================================================
+	// Measurement Protocol
+	// =========================================================================
+
+	public function testSendEventPostsThroughTheMeasurementProtocol()
+	{
+		$module = $this->probe();
+		$module->setApiSecret('s3cret');
+		$module->setUserId('customer-42');
+		self::assertTrue($module->sendEvent('purchase', ['value' => 9.99]));
+		$mp = $module->protocol;
+		self::assertSame($mp, $module->getMeasurementProtocol());
+		self::assertSame('G-TEST1234AB', $mp->getMeasurementId());
+		self::assertSame('s3cret', $mp->getApiSecret());
+		self::assertFalse($mp->getDebug());
+		self::assertCount(1, $mp->posts);
+		self::assertStringStartsWith('https://www.google-analytics.com/mp/collect?measurement_id=G-TEST1234AB&api_secret=s3cret', $mp->posts[0]['url']);
+		$payload = $mp->lastPayload();
+		self::assertMatchesRegularExpression('/^\d+\.\d+$/', $payload['client_id'], 'A client id is generated without a cookie.');
+		self::assertSame('customer-42', $payload['user_id']);
+		self::assertSame([['name' => 'purchase', 'params' => ['value' => 9.99]]], $payload['events']);
+
+		self::assertTrue($module->sendEvent('login', [], '111.222'));
+		$payload = $mp->lastPayload();
+		self::assertSame('111.222', $payload['client_id']);
+		self::assertSame([['name' => 'login']], $payload['events']);
+
+		$module->setDebugMode(true);
+		$mp->status = 500;
+		self::assertFalse($module->sendEvent('login'));
+		self::assertTrue($module->getMeasurementProtocol()->getDebug());
+		self::assertStringStartsWith('https://www.google-analytics.com/debug/mp/collect?', $mp->posts[2]['url']);
+	}
+
+	public function testSendEventUsesTheVisitorsGaCookie()
+	{
+		$module = $this->probe();
+		$module->setApiSecret('s3cret');
+		$cookies = $this->_app->getRequest()->getCookies();
+		$cookie = new THttpCookie('_ga', 'GA1.1.1234567890.1700000000');
+		$cookies->add($cookie);
+		try {
+			self::assertSame('1234567890.1700000000', $module->getClientId());
+			$module->sendEvent('login');
+			self::assertSame('1234567890.1700000000', $module->protocol->lastPayload()['client_id']);
+		} finally {
+			$cookies->remove($cookie);
+		}
+		self::assertNull($module->getClientId());
+	}
+
+	public function testSendEventRequiresTheApiSecret()
+	{
+		$module = $this->probe();
+		$this->expectException(TConfigurationException::class);
+		$module->sendEvent('login');
+	}
+
+	public function testSendEventRefusesAnInvalidName()
+	{
+		$module = $this->probe();
+		$module->setApiSecret('s3cret');
+		$this->expectException(TInvalidDataValueException::class);
+		$module->sendEvent('bad-name');
+	}
+
+	public function testApiSecretTrimsAndClears()
+	{
+		$module = $this->module();
+		$module->setApiSecret(' abc ');
+		self::assertSame('abc', $module->getApiSecret());
+		$module->setApiSecret('');
+		self::assertNull($module->getApiSecret());
+	}
+
+	// =========================================================================
+	// Content Security Policy
+	// =========================================================================
+
+	public function testCspSourcesIncludeACustomTagHost()
+	{
+		$module = $this->module();
+		self::assertSame(GAnalyticsModule::CSP_SOURCES, $module->getCspSources(), 'Google hosts only for the default tag URL.');
+		$module->setTagUrl('https://www.googletagmanager.com/gtag/js?l=x');
+		self::assertSame(GAnalyticsModule::CSP_SOURCES, $module->getCspSources());
+		$module->setTagUrl('https://metrics.example.com:8443/gtag/js');
+		$sources = $module->getCspSources();
+		foreach ([TCspDirective::ScriptSrc, TCspDirective::ConnectSrc, TCspDirective::ImgSrc] as $directive) {
+			self::assertSame('https://metrics.example.com:8443', end($sources[$directive]), $directive);
+		}
+	}
+
+	public function testAmendCspHeaderCreatesDirectivesFromDefaultSrcAndAppendsToExistingOnes()
+	{
+		$module = $this->module();
+		$csp = new THttpHeaderCsp();
+		$csp->setPolicies([TCspDirective::DefaultSrc => "'self' NONCE", TCspDirective::ScriptSrc => "'self' https://*.googletagmanager.com cdn.example.com", TCspDirective::FrameSrc => "'none'"]);
+		self::assertTrue($module->amendCspHeader($csp));
+		self::assertSame("'self' https://*.googletagmanager.com cdn.example.com", $csp->getPolicy(TCspDirective::ScriptSrc), 'Already allowed: unchanged, no duplicate.');
+		self::assertSame("'self' NONCE https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com", $csp->getPolicy(TCspDirective::ConnectSrc), 'Created from default-src.');
+		self::assertSame("'self' NONCE https://*.google-analytics.com https://*.googletagmanager.com", $csp->getPolicy(TCspDirective::ImgSrc));
+		self::assertSame("'self' NONCE", $csp->getPolicy(TCspDirective::DefaultSrc), 'default-src itself is untouched.');
+		self::assertSame("'none'", $csp->getPolicy(TCspDirective::FrameSrc));
+		self::assertFalse($module->amendCspHeader($csp), 'Amending again changes nothing.');
+	}
+
+	public function testAmendCspHeaderLeavesUnrestrictedAndRawPoliciesAlone()
+	{
+		$module = $this->module();
+		$csp = new THttpHeaderCsp();
+		$csp->setPolicies([TCspDirective::FrameAncestors => "'none'"]);
+		self::assertFalse($module->amendCspHeader($csp));
+		self::assertFalse($csp->hasPolicy(TCspDirective::ScriptSrc), 'No script-src or default-src: nothing restricts the tag.');
+
+		$csp->setPolicies([TCspDirective::ScriptSrc => "'self'"]);
+		self::assertTrue($module->amendCspHeader($csp));
+		self::assertSame("'self' https://*.googletagmanager.com", $csp->getPolicy(TCspDirective::ScriptSrc));
+		self::assertFalse($csp->hasPolicy(TCspDirective::ConnectSrc), 'Only the restricting directive is amended.');
+
+		$raw = new THttpHeaderCsp();
+		$raw->setPolicies("default-src 'self'");
+		self::assertFalse($module->amendCspHeader($raw));
+	}
+
+	public function testAmendCspPoliciesFindsTheHeadersManagers()
+	{
+		$manager = new THttpHeadersManager();
+		$csp = new THttpHeaderCsp();
+		$csp->setPolicies([TCspDirective::DefaultSrc => "'self'"]);
+		$manager->addHeader($csp);
+		$manager->addHeader(new THttpHeaderCsp());
+		$this->_app->setModule('headers-' . uniqid(), $manager);
+
+		$module = $this->module();
+		self::assertSame(1, $module->amendCspPolicies(), 'The empty header restricts nothing.');
+		self::assertSame("'self' https://*.googletagmanager.com", $csp->getPolicy(TCspDirective::ScriptSrc));
+		self::assertSame(0, $module->amendCspPolicies());
+
+		$csp->setPolicies([TCspDirective::DefaultSrc => "'self'"]);
+		$quiet = $this->module();
+		$quiet->setAmendCsp(false);
+		$quiet->setAttachPageBehavior(false);
+		$quiet->attachPageServiceHandler($this->_app, null);
+		self::assertFalse($csp->hasPolicy(TCspDirective::ScriptSrc), 'AmendCsp=false leaves the policy alone.');
+		$module->setAttachPageBehavior(false);
+		$module->attachPageServiceHandler($this->_app, null);
+		self::assertTrue($csp->hasPolicy(TCspDirective::ScriptSrc), 'Hooking the application amends the policy.');
+	}
+
+	// =========================================================================
+	// Page behavior
+	// =========================================================================
+
+	public function testHookingTheApplicationAttachesThePageBehavior()
+	{
+		$module = $this->probe();
+		$module->setAttachPageBehavior(true);
+		self::assertNull((new TPage())->asa(GAnalyticsModule::PAGE_BEHAVIOR_NAME));
+		$module->attachPageServiceHandler($this->_app, null);
+		self::assertInstanceOf(GAnalyticsPageBehavior::class, $module->getPageBehavior());
+		$page = new TPage();
+		self::assertSame($module, $page->getGAnalytics());
+		$module->registerPageScripts($page);
+		$page->trackEvent('from_page');
+		self::assertSame([['event', 'from_page']], $module->getQueuedCalls());
+
+		$module->detachPageBehavior();
+		self::assertNull((new TPage())->asa(GAnalyticsModule::PAGE_BEHAVIOR_NAME));
+		$module->setAttachPageBehavior(false);
+		$module->attachPageServiceHandler($this->_app, null);
+		self::assertNull($module->getPageBehavior(), 'AttachPageBehavior=false attaches nothing.');
 	}
 
 	public function testMeasurementIdAcceptsGoogleTagIds()

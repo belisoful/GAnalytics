@@ -1,6 +1,6 @@
 # GAnalytics
 
-A PRADO 4 extension adding the Google tag (gtag.js, Google Analytics 4) to every page: `belisoful\GAnalytics\GAnalyticsModule`, a `TPluginModule`.
+A PRADO 4 extension for Google Analytics 4: `GAnalyticsModule` (a `TPluginModule`) adds the Google tag (gtag.js) to every page, queues `gtag()` calls for pages and callbacks, derives the `user_id`, amends the CSP and fronts the Measurement Protocol; `GAnalyticsPageBehavior` (a `TClassBehavior` on `TPage`) exposes the calls on pages; `GAnalyticsMeasurementProtocol` sends events from PHP.
 
 ## Version
 
@@ -11,11 +11,12 @@ A PRADO 4 extension adding the Google tag (gtag.js, Google Analytics 4) to every
 
 ## Key facts
 
-- One class, `src/GAnalyticsModule.php` (PSR-4 `belisoful\GAnalytics\` → `src/`). Its Prado3 short name comes from `config/classMap.json`; the bootstrap class, the class map and the error messages are registered by **Composer** from `composer.json` `extra.prado`.
+- Three classes under `src/` (PSR-4 `belisoful\GAnalytics\` → `src/`). Prado3 short names come from `config/classMap.json`; the bootstrap class, the class map and the error messages are registered by **Composer** from `composer.json` `extra.prado`.
 - Error codes (keys) and messages live in `config/errorMessages.txt` (`ganalytics_*`).
 - Unit tests are namespaced `belisoful\GAnalytics\Test\Unit` mirroring `tests/unit/` (Composer `autoload-dev`); the phpunit bootstrap constructs a `TApplication` on `tests/unit/app`.
-- The module hooks `TPageService::onPreRunPage` (from `TApplication::onInitComplete`, or at once when the application is already initialized) and registers the tag on the page's `TClientScriptManager` under the key `gtag`.
-- Every value written into the page goes through `TJavaScript::encode()` / `rawurlencode()`.
+- The module hooks `TPageService::onPreRunPage` (from `TApplication::onInitComplete`, or at once when the application is already initialized), attaches the page behavior and amends the CSP there, and registers the tag on the page's `TClientScriptManager` under the key `gtag`. Queued calls are delivered at `TPage::onPreRenderComplete` (end script, or the callback client on a callback; the session holds deferred calls under `SESSION_KEY`).
+- Every value written into the page goes through `TJavaScript::encode()` / `rawurlencode()`. Time is read through the clock seam (`TApplicationClockAwareTrait`).
+- Tests use the fixtures `ProbeGAnalyticsModule` (in-memory deferred store, recording protocol), `RecordingMeasurementProtocol` and `FakeUser`; `tearDown()` detaches the class behavior from `TPage`, restores the service, mode and user.
 - The public API is published (v1.0.0 onward). Prefer compatible changes. A breaking change needs an entry under "Upgrading" in `CHANGELOG.md`.
 
 ## Checks (all must pass before commit)

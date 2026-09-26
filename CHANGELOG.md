@@ -13,12 +13,18 @@ This release brings the extension to PRADO 4.4 and its current extension convent
 - `ConfigOptions`: further `gtag('config')` parameters, as an array or a JSON object string.
 - `ConsentDefaults`: Consent Mode defaults, emitted as `gtag('consent', 'default', …)` before the configuration.
 - `TagUrl`: the script host, for first-party or server-side tagging.
+- `AdditionalMeasurementIds` (further `gtag('config')` tags), `EnabledModes` (the `TApplicationMode`s the tag runs in), `PagePathAsContentGroup` (the page path as GA4 `content_group`), `DataLayerName`.
+- `UserId`, and `UserIdFromUser`: the GA4 `user_id` as an HMAC of the authenticated PRADO user's name under the security manager's validation key.
+- Events from page code: `trackEvent()`, `updateConsent()`, `setUserProperties()`, `gtag()` and `queueCall()` queue `gtag()` calls delivered at `TPage::onPreRenderComplete`, as a script block on a full page or through the callback client on an ActiveControl callback; deferred calls survive a redirect in the session.
+- `GAnalyticsPageBehavior`, a class behavior the module attaches to `TPage` (`AttachPageBehavior`), so pages call `$this->trackEvent(…)` and `$this->getGAnalytics()`.
+- `GAnalyticsMeasurementProtocol` and `sendEvent()`: events from PHP over the Measurement Protocol (`ApiSecret`), under the visitor's `_ga` client id (`getClientId()`), timestamped from PRADO's clock; `DebugMode` uses the validation endpoint.
+- `AmendCsp`: Google's hosts are added to every `THttpHeaderCsp` of the application's `THttpHeadersManager` modules (`amendCspPolicies()`, `amendCspHeader()`, `getCspSources()`).
 - `onPreRegisterScript`: raised with a `TEventParameter` carrying the page; stopping it leaves the page without the tag.
-- `registerPageScripts()`, `getTagScriptUrl()`, `getTagScript()` and `getEffectiveConfigOptions()` as public API.
+- `registerPageScripts()`, `getIsActive()`, `getTagScriptUrl()`, `getTagScript()`, `getEffectiveConfigOptions()` and `getEffectiveUserId()` as public API.
 - A page without a `THead` receives the tag at the beginning of its form.
 - A module loaded after the application initialized (a lazy module) hooks the running page service at once.
-- `config/classMap.json` (the Prado3 short name `GAnalyticsModule`) and `config/errorMessages.txt` (`ganalytics_*` error codes), both registered by Composer from `extra.prado`.
-- Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
+- `config/classMap.json` (the Prado3 short names) and `config/errorMessages.txt` (`ganalytics_*` error codes), both registered by Composer from `extra.prado`.
+- Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`, 117 tests), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
 - `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`.
 
 ### Changed

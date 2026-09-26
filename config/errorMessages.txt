@@ -1,4 +1,12 @@
 
-ganalytics_measurementid_invalid		= Google tag Measurement ID '{0}' is not valid; expected a tag id such as 'G-XXXXXXXXXX'.
-ganalytics_tagurl_invalid				= Google tag script URL '{0}' is not an absolute http or https URL.
-ganalytics_options_invalid				= Google tag {0} must be an array or a JSON object; '{1}' is neither.
+ganalytics_measurementid_invalid			= Google tag Measurement ID '{0}' is not valid; expected a tag id such as 'G-XXXXXXXXXX'.
+ganalytics_tagurl_invalid					= Google tag script URL '{0}' is not an absolute http or https URL.
+ganalytics_options_invalid					= Google tag {0} must be an array or a JSON object; '{1}' is neither.
+ganalytics_datalayername_invalid			= Google tag data layer name '{0}' is not a JavaScript identifier.
+ganalytics_event_name_invalid				= Google Analytics event name '{0}' is not valid; expected a letter followed by up to 39 letters, digits or underscores.
+ganalytics_gtag_call_invalid				= A gtag call needs a command string as its first argument; got {0}.
+ganalytics_measurement_protocol_unconfigured	= The Measurement Protocol needs a Measurement ID and an ApiSecret.
+ganalytics_clientid_invalid					= Measurement Protocol client id '{0}' is empty.
+ganalytics_events_count_invalid				= A Measurement Protocol request carries 1 to {1} events; got {0}.
+ganalytics_payload_unencodable				= The Measurement Protocol payload cannot be encoded as JSON: {0}.
+ganalytics_timeout_invalid					= Measurement Protocol timeout '{0}' is not a positive number of seconds.

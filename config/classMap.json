@@ -1,3 +1,5 @@
 {
-	"GAnalyticsModule": "belisoful\\GAnalytics\\GAnalyticsModule"
+	"GAnalyticsModule": "belisoful\\GAnalytics\\GAnalyticsModule",
+	"GAnalyticsPageBehavior": "belisoful\\GAnalytics\\GAnalyticsPageBehavior",
+	"GAnalyticsMeasurementProtocol": "belisoful\\GAnalytics\\GAnalyticsMeasurementProtocol"
 }

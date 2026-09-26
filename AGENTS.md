@@ -31,7 +31,7 @@
 - Code must run without deprecation notices on PHP 8.1 through 8.5: no implicitly nullable parameters (write `?Type $x = null`), no non-canonical casts (`(boolean)`, `(integer)`, `(double)`), no `E_STRICT`
 
 ### Naming Conventions
-- Class names: `PascalCase` (the module is `GAnalyticsModule`; a new framework-style class takes the `T` prefix, an interface the `I` prefix)
+- Class names: `PascalCase` with the `GAnalytics` prefix (`GAnalyticsModule`, `GAnalyticsPageBehavior`, `GAnalyticsMeasurementProtocol`); an interface takes the `I` prefix
 - Method names: `camelCase` (eg. `registerPageScripts`)
 - Variables: `camelCase` (eg. `$measurementId`)
 - Class Constants: `SCREAMING_SNAKE_CASE` (eg. `MEASUREMENT_ID_PARAMETER`)
@@ -76,7 +76,7 @@ Docblocks inform and describe; it is not persuasive writing.
 
 ### Error Handling
 - Throw appropriate PRADO exceptions (`TInvalidDataValueException` for a refused property value, `TConfigurationException` for a configuration that cannot work, `TInvalidOperationException` for a call out of sequence)
-- Return false or null for methods that are designed to fail gracefully (`registerPageScripts()` returns false when the page runs without the tag; `getMeasurementId()` returns null when none resolves)
+- Return false or null for methods that are designed to fail gracefully (`registerPageScripts()` returns false when the page runs without the tag; `getMeasurementId()` returns null when none resolves; `sendEvent()` returns false and logs when Google refuses)
 - All methods should handle edge cases and validate input parameters
 - Extension Exceptions use error codes (keys) defined in `config/errorMessages.txt`; the message text is purely for user information display only. Every code thrown must exist in that file, and the file should carry no unused codes.
 - Conditions that are not errors (no Measurement ID configured) are logged through `Prado::log()` with `\Prado\Util\Log\TLogger` levels, under the module's class as category.
@@ -104,12 +104,17 @@ Docblocks inform and describe; it is not persuasive writing.
 - Follow the TApplication Lifecycle: onConfiguration → onInitComplete (at end of TApplication::initApplication) → onBeginRequest → onLoadState → onLoadStateComplete → onAuthentication → onAuthenticationComplete → onAuthorization → onAuthorizationComplete → onPreRunService → runService → onSaveState → onSaveStateComplete → onPreFlushOutput → flushOutput → onEndRequest or onError (both at end of TApplication::run)
 - Follow the TPage Lifecycle (via TPageService::runPage): onPreInit → initRecursive → onInitComplete → loadPageState (POST/Callback) → processPostData (POST/Callback) → onPreLoad → loadRecursive → processPostData (POST/Callback) → raiseChangedEvents (POST/Callback) → raisePostBackEvent (POST-only) → processCallbackEvent (Callback-only) → onLoadComplete → preRenderRecursive  onPreRenderComplete → savePageState → onSaveStateComplete → renderControl (GET/POST) → renderCallbackResponse (Callback-only) → unloadRecursive
 - XML and PHP is supported for application configuration
-- TPageService::onPreRunPage gives PRADO Modules event access to the TPage Lifecycle before it runs; this module registers the tag there. `TPage::getIsCallback()` is not meaningful before `TPage::run()`, so callback handling happens at `onPreRenderComplete`.
+- TPageService::onPreRunPage gives PRADO Modules event access to the TPage Lifecycle before it runs; this module registers the tag there. `TPage::getIsCallback()` is not meaningful before `TPage::run()`, so callback handling and call delivery happen at `onPreRenderComplete`: a full page gets an end script, a callback gets `TCallbackClientScript::callClientFunction('gtag', …)` (the client resolves the global `gtag` function by name).
+- `TPage::getCallbackClient()` returns the adapter's client on a callback and a throwaway object otherwise; only the callback path uses it.
+- Class behaviors (`TComponent::attachClassBehavior(name, behavior, TPage::class)`) inject the owner as the first method argument (`IClassBehavior`); `GAnalyticsPageBehavior` methods take `$page` first. A name can be attached once per class; tests detach it in `tearDown()`.
+- `THttpHeadersManager` modules carry `THttpHeaderCsp` headers whose directives are read with `getPolicy()` and replaced with `setPolicy()` (`addPolicy()` is an alias, not an append); `TJavaScript` emits the CSP nonce on every script tag it renders.
+- The `user_id` derivation uses `TSecurityManager::getValidationKey()` (HMAC-SHA256 of the `IUser` name); `computeHMAC()` is protected.
+- The Measurement Protocol client reads `TApplicationClockAwareTrait::getClock()` for `timestamp_micros` and generated client ids; tests set a `TMockClock`.
 - Modules configured in the application initialize before `onInitComplete`; a lazily loaded module initializes later, when `TApplication::hasStateFlag(TApplication::STATE_INITIALIZED)` is already true. `init()` handles both.
 - Framework core updates 'framework/classes.php' with new classes; this does NOT apply to this extension (see the PSR-4 / class-map note below).
 - Web Pages are PHP classes with a ".page" TTemplate file with the same base name
 - UI Portlets are PHP classes with a ".tpl" TTemplate file with the same base name
-- Head scripts (`registerHeadScriptFile`/`registerHeadScript`) render only through `THead`; form scripts (`registerScriptFile`/`registerBeginScript`) render in the form, and begin scripts also render in a callback response. Time, when needed, is read through PRADO's clock seam (`TApplicationClockAwareTrait`), never `time()` directly.
+- Head scripts (`registerHeadScriptFile`/`registerHeadScript`) render only through `THead`; form scripts (`registerScriptFile`/`registerBeginScript`/`registerEndScript`) render in the form, and begin scripts also render in a callback response. Time is read through PRADO's clock seam (`TApplicationClockAwareTrait`), never `time()` directly.
 - Logging goes through `Prado::log()` with `\Prado\Util\Log\TLogger` levels (the logger moved to `Prado\Util\Log` in PRADO 4.4).
 - The public API is published (v1.0.0 onward): prefer compatible changes, and document any breaking change under "Upgrading" in `CHANGELOG.md`
 - Record every user-visible change under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format) as it lands
@@ -128,6 +133,7 @@ Docblocks inform and describe; it is not persuasive writing.
   - Helper classes in their own file must not end in `Test`; phpunit collects `*Test.php` files as tests.
   - Global classes are written with a leading backslash inside the test namespace (`new \stdClass()`).
 - `tests/test_tools/phpunit_bootstrap.php` registers the error messages, defines `PRADO_TEST_RUN` (so a test may construct another `TApplication`), and constructs a `TApplication` on `tests/unit/app` without running it. A test that needs a page sets a `TPageService` as the application's service (`TPage::getClientScript()` asks the service for its manager class) and restores the previous service in `tearDown()`.
+- Shared fixtures live in their own files: `ProbeGAnalyticsModule` (an `\ArrayObject` deferred store, a `RecordingMeasurementProtocol`), `RecordingMeasurementProtocol` (records `post()` calls, answers a canned status) and `FakeUser` (an `IUser`). Network, session and randomness never reach a test.
 - All new code must include unit tests
 - Unit test functions must comprehensively assert both typical and edge cases
 - Maximal coverage of code execution paths of a class is required
@@ -156,10 +162,12 @@ Docblocks inform and describe; it is not persuasive writing.
 │   ├── classMap.json           # Prado3 short class name → fully qualified name (composer extra.prado.class-map)
 │   └── errorMessages.txt       # Error codes and messages (composer extra.prado.error-messages)
 ├── src/                        # PSR-4 root for belisoful\GAnalytics
-│   └── GAnalyticsModule.php    # The module
+│   ├── GAnalyticsModule.php    # The module: tag, calls, user id, CSP, Measurement Protocol front
+│   ├── GAnalyticsPageBehavior.php          # TClassBehavior on TPage: trackEvent() and friends on pages
+│   └── GAnalyticsMeasurementProtocol.php   # Server-side Measurement Protocol client
 ├── tests/
 │   ├── test_tools/             # phpunit and phpstan bootstraps
-│   └── unit/                   # phpunit tests; namespace belisoful\GAnalytics\Test\Unit (autoload-dev PSR-4)
+│   └── unit/                   # phpunit tests and fixtures; namespace belisoful\GAnalytics\Test\Unit (autoload-dev PSR-4)
 │       └── app/                # The minimal application the tests construct
 ├── AGENTS.md                   # This file
 ├── CHANGELOG.md                # Release notes (Keep a Changelog)

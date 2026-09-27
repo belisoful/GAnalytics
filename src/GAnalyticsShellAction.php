@@ -159,15 +159,15 @@ class GAnalyticsShellAction extends TShellAction
 			['Data layer', $module->getDataLayerName()],
 			['Enabled modes', \implode(', ', $module->getEnabledModes()) ?: 'all'],
 			['Config options', \json_encode($valid ? $module->getEffectiveConfigOptions() : [], JSON_UNESCAPED_SLASHES)],
-			['Consent defaults', \json_encode($module->getEffectiveConsentDefaults(), JSON_UNESCAPED_SLASHES)],
-			['Consent provider', $this->describeObject($module->getConsentProvider())],
+			['Consent defaults', $this->report(fn () => $module->getEffectiveConsentDefaults(), fn (array $defaults) => (string) \json_encode($defaults, JSON_UNESCAPED_SLASHES))],
+			['Consent provider', $this->report(fn () => $module->getConsentProvider(), fn (mixed $provider) => $this->describeObject($provider))],
 			['User id', $module->getUserIdFromUser() ? 'from the application user' : ($module->getUserId() ?? '-')],
 			['Tracking', \implode(', ', \array_keys(\array_filter(['exceptions' => $module->getTrackExceptions(), 'logins' => $module->getTrackLogins(), 'validation errors' => $module->getTrackValidationErrors()]))) ?: '-'],
 			['Page behavior', $module->getAttachPageBehavior() ? 'attached' : 'off'],
 			['Amend CSP', $module->getAmendCsp() ? 'yes' : 'no'],
 			['API secret', $module->getApiSecret() !== null ? 'set' : '-'],
 			['Property', $module->getPropertyId() ?? '-'],
-			['Credentials', $this->describeObject($module->getCredentials())],
+			['Credentials', $this->report(fn () => $module->getCredentials(), fn (mixed $credentials) => $this->describeObject($credentials))],
 		];
 		foreach ($rows as [$label, $value]) {
 			$writer->write('  ' . $writer->pad($label, 18));
@@ -176,7 +176,7 @@ class GAnalyticsShellAction extends TShellAction
 		if ($valid && $module->getHasTag()) {
 			$writer->writeLine();
 			$writer->writeLine('Tag script', [TShellWriter::BOLD]);
-			$writer->writeLine($module->getTagScript());
+			$writer->writeLine($this->report(fn () => $module->getTagScript(), fn (string $script) => $script));
 		}
 		$writer->writeLine();
 		return true;
@@ -429,6 +429,22 @@ class GAnalyticsShellAction extends TShellAction
 	}
 
 	/**
+	 * Formats a value for the status report, or the configuration error resolving it raises, so
+	 * one bad module id does not take the whole report down.
+	 * @param callable(): mixed $resolve Returns the value.
+	 * @param callable(mixed): string $format Formats the value.
+	 * @return string The formatted value, or the error.
+	 */
+	protected function report(callable $resolve, callable $format): string
+	{
+		try {
+			return $format($resolve());
+		} catch (TException $e) {
+			return 'invalid: ' . $e->getMessage();
+		}
+	}
+
+	/**
 	 * @return ?string The `--clientid` override.
 	 */
 	public function getClientId(): ?string
@@ -441,7 +457,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	public function setClientId($value): void
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_clientId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
@@ -458,7 +474,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	public function setUserId($value): void
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_userId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
@@ -475,7 +491,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	public function setLimit($value): void
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_limit = ($value === null) ? null : \max(1, TPropertyValue::ensureInteger($value));
 	}
 
@@ -492,7 +508,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	public function setProperty($value): void
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_property = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 }

@@ -33,7 +33,7 @@ use Prado\Util\Clock\TApplicationClockAwareTrait;
  *
  * ```xml
  * <module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" PropertyId="123456789">
- *     <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="protected/ga4-service-account.json" />
+ *     <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="ga4-service-account.json" />
  * </module>
  * ```
  *
@@ -116,7 +116,6 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	 */
 	protected function requestToken(int $now): array
 	{
-		$key = $this->getKey();
 		$body = \http_build_query([
 			'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
 			'assertion' => $this->createAssertion($now),
@@ -196,11 +195,13 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	}
 
 	/**
-	 * @return string The application cache key of the token: the account and the scopes.
+	 * @throws TConfigurationException When neither a key nor a key file is set, or the file cannot be read.
+	 * @throws TInvalidDataValueException When the key is not a service account key.
+	 * @return string The application cache key of the token: the account's `client_email` and the scopes, so the key is the same however the key was set.
 	 */
 	protected function getCacheKey(): string
 	{
-		return static::CACHE_PREFIX . \sha1(($this->_key['client_email'] ?? $this->_keyFile ?? '') . '|' . \implode(' ', $this->getScopes()));
+		return static::CACHE_PREFIX . \sha1((string) $this->getKey()['client_email'] . '|' . \implode(' ', $this->getScopes()));
 	}
 
 	/**
@@ -231,7 +232,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	 */
 	public function setKey($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_key = null;
 			return;
@@ -254,12 +255,13 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 
 	/**
 	 * Sets the path of the JSON key file. A relative path is resolved against the application's
-	 * base path when an application runs. The file is read on first use.
+	 * base path (the `protected` directory) when an application runs, so `ga4-key.json` names
+	 * `protected/ga4-key.json`. The file is read on first use.
 	 * @param mixed $value The path; empty for none.
 	 */
 	public function setKeyFile($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_keyFile = null;
 			return;

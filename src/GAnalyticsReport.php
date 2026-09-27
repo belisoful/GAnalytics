@@ -180,6 +180,7 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 	protected function convertRows(array $rows): array
 	{
 		$result = [];
+		$metricNames = \array_keys($this->_metricHeaders);
 		foreach ($rows as $row) {
 			$entry = [];
 			foreach ((array) ($row['dimensionValues'] ?? []) as $i => $value) {
@@ -187,7 +188,7 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 			}
 			$i = 0;
 			foreach ((array) ($row['metricValues'] ?? []) as $value) {
-				$name = \array_keys($this->_metricHeaders)[$i] ?? 'metric' . $i;
+				$name = $metricNames[$i] ?? 'metric' . $i;
 				$entry[$name] = static::castMetric($value['value'] ?? null, $this->_metricHeaders[$name] ?? 'TYPE_STRING');
 				$i++;
 			}

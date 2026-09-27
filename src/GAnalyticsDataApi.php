@@ -229,7 +229,7 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 	 */
 	public static function normalizePropertyId($value): ?string
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			return null;
 		}

@@ -3,6 +3,17 @@
 All notable changes to `belisoful/ganalytics` are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Fixed
+- `queueCall()` (and `trackEvent()`, `updateConsent()`, `setUserProperties()`, `gtag()`) drops a call with a notice while the module is inactive or has no tag, instead of deferring it to the session forever and opening a session for every visitor.
+- `getContainerNoScriptHtml()` builds the `ns.html` URL from the `ContainerUrl` origin and directory, so a host-only URL, a trailing slash or a port no longer yield a broken frame source.
+- `amendCspHeader()` drops a `'none'` token from a directive it adds sources to; `'none'` beside a source is an invalid policy.
+- `GAnalyticsServiceAccountCredentials` shares one application-cache token whether the key is set by `KeyFile` or by `Key`: the cache key is the account's `client_email`.
+- `ganalytics/status` reports an unresolvable `ConsentProvider` or `Credentials` in its own row instead of aborting the report.
+- The string `'0'` is a value, not an empty one, for `UserId`, `ApiSecret`, `AccessToken`, `Key`, the endpoints and the other optional properties (`TPropertyValue::ensureNullIf()` with `FILTER_EMPTY`).
+- The configuration examples resolve `KeyFile` against the application's base path (`protected`), so `KeyFile="ga4-key.json"` names `protected/ga4-key.json`.
+
 ## [1.0.0] - 2026-09-26
 
 This release brings the extension to PRADO 4.4 and its current extension conventions, and lands the audit recorded in `agents/working/AUDIT_2026-09-26.md`. It changes the package requirements and some behavior; see [Upgrading from 0.0.1](#upgrading-from-001).

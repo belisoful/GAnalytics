@@ -145,7 +145,7 @@ abstract class GAnalyticsApiClient extends TComponent
 	 */
 	public function setBaseUrl($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_baseUrl = static::getDefaultBaseUrl();
 			return;

@@ -52,6 +52,9 @@ class GAnalyticsCredentialsTest extends TestCase
 	{
 		$credentials = new GAnalyticsAccessTokenCredentials(' abc ');
 		self::assertInstanceOf(IGAnalyticsCredentials::class, $credentials);
+		$credentials->setAccessToken('0');
+		self::assertSame('0', $credentials->getAccessToken(), "The token '0' is a value, not an empty one.");
+		$credentials->setAccessToken(' abc ');
 		self::assertSame('abc', $credentials->getAccessToken());
 		$credentials->setAccessToken('');
 		$this->expectException(TConfigurationException::class);
@@ -144,6 +147,21 @@ class GAnalyticsCredentialsTest extends TestCase
 			$third->answer(['access_token' => 'ya29.fresh']);
 			$third->getClock()->setTime(1_700_000_000 + 4000);
 			self::assertSame('ya29.fresh', $third->getAccessToken(), 'clearToken() also drops the cached token.');
+
+			$dir = \sys_get_temp_dir() . '/ganalytics-' . \uniqid();
+			\mkdir($dir);
+			$file = $dir . '/key.json';
+			\file_put_contents($file, \json_encode($this->key()));
+			try {
+				$byFile = new RecordingServiceAccountCredentials();
+				$byFile->setKeyFile($file);
+				$byFile->setClock((new TMockClock())->setTime(1_700_000_000 + 4000));
+				self::assertSame('ya29.fresh', $byFile->getAccessToken(), 'The cache key is the account, however the key was set.');
+				self::assertCount(0, $byFile->requests);
+			} finally {
+				\unlink($file);
+				\rmdir($dir);
+			}
 		} finally {
 			$cache->flush();
 		}

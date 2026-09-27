@@ -48,7 +48,7 @@ use Prado\Xml\TXmlElement;
  *         UserIdFromUser="true" PagePathAsContentGroup="true" EnabledModes="Normal, Performance"
  *         TrackExceptions="true" TrackLogins="true" TrackValidationErrors="true"
  *         ApiSecret="…" PropertyId="123456789" ConsentProvider="consent">
- *         <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="protected/ga4-key.json" />
+ *         <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="ga4-key.json" />
  *     </module>
  * </modules>
  * ```
@@ -721,6 +721,7 @@ class GAnalyticsModule extends TPluginModule
 			if (\count($missing) === 0 && $csp->hasPolicy($directive)) {
 				continue;
 			}
+			$tokens = \array_values(\array_filter($tokens, static fn (string $token): bool => \strcasecmp($token, "'none'") !== 0));
 			$csp->setPolicy($directive, \implode(' ', \array_merge($tokens, $missing)));
 			$changed = true;
 		}
@@ -815,16 +816,22 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Queues a gtag call; see {@see trackEvent()} for the delivery rules.
+	 * Queues a gtag call; see {@see trackEvent()} for the delivery rules. While the module is
+	 * not {@see getIsActive() active} or has no {@see getHasTag() tag}, no page ever delivers a
+	 * call, so the call is dropped with a notice instead of piling up in the session.
 	 * @param array<int, mixed> $args The gtag arguments; the first is the command, a string.
 	 * @param bool $deferred Whether the call is delivered on the next page instead of this one.
-	 * @throws TInvalidDataValueException When there is no command or it is not a string.
+	 * @throws TInvalidDataValueException When there is no command or it is not a string, or the Measurement ID read from the application parameter is not valid.
 	 */
 	public function queueCall(array $args, bool $deferred = false): void
 	{
 		$args = \array_values($args);
 		if (\count($args) === 0 || !\is_string($args[0]) || \trim($args[0]) === '') {
 			throw new TInvalidDataValueException('ganalytics_gtag_call_invalid', \json_encode($args, JSON_UNESCAPED_SLASHES) ?: '');
+		}
+		if (!$this->getIsActive() || !$this->getHasTag()) {
+			Prado::log('The module is inactive or has no tag; the gtag call ' . \json_encode($args[0]) . ' was dropped.', TLogger::NOTICE, static::class);
+			return;
 		}
 		if ($deferred || $this->_page === null || $this->_flushed) {
 			$this->storeDeferredCalls([$args]);
@@ -1036,7 +1043,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setApiSecret($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_apiSecret = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
@@ -1344,7 +1351,10 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function getContainerNoScriptHtml(): string
 	{
-		$url = \dirname($this->getContainerUrl()) . '/ns.html?id=' . \rawurlencode((string) $this->getContainerId());
+		$parts = \parse_url($this->getContainerUrl());
+		$path = $parts['path'] ?? '/';
+		$url = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? '') . (isset($parts['port']) ? ':' . $parts['port'] : '')
+			. \substr($path, 0, (int) \strrpos($path, '/')) . '/ns.html?id=' . \rawurlencode((string) $this->getContainerId());
 		if ($this->getDataLayerName() !== static::DEFAULT_DATA_LAYER_NAME) {
 			$url .= '&l=' . \rawurlencode($this->getDataLayerName());
 		}
@@ -1505,7 +1515,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setMeasurementId($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_measurementId = ($value === null) ? null : $this->ensureMeasurementId($value);
 	}
 
@@ -1537,7 +1547,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setMeasurementIdParameter($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_measurementIdParameter = ($value === null) ? static::MEASUREMENT_ID_PARAMETER : (string) TPropertyValue::ensureString($value);
 	}
 
@@ -1750,7 +1760,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setUserId($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_userId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
@@ -1786,7 +1796,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setTagUrl($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_tagUrl = static::DEFAULT_TAG_URL;
 			return;
@@ -1816,7 +1826,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setDataLayerName($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_dataLayerName = static::DEFAULT_DATA_LAYER_NAME;
 			return;
@@ -1876,7 +1886,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setContainerId($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_containerId = null;
 			return;
@@ -1905,7 +1915,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setContainerUrl($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_containerUrl = static::DEFAULT_CONTAINER_URL;
 			return;
@@ -1995,7 +2005,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setLoginMethod($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_loginMethod = ($value === null) ? static::DEFAULT_LOGIN_METHOD : \mb_substr(\trim((string) TPropertyValue::ensureString($value)), 0, static::PARAM_MAX_LENGTH);
 	}
 
@@ -2013,7 +2023,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function setShellClass($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			$this->_shellClass = static::DEFAULT_SHELL_CLASS;
 			return;

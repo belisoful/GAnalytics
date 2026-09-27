@@ -157,6 +157,21 @@ class GAnalyticsShellActionTest extends TestCase
 		}
 	}
 
+	public function testStatusReportsAnUnresolvableProviderOrCredentialsInTheirRow()
+	{
+		$module = $this->module();
+		$module->setConsentProvider('no-such-module-' . \uniqid());
+		$module->setCredentials('no-such-module-' . \uniqid());
+		$action = $this->action($module);
+		self::assertTrue($action->actionStatus([]));
+		$out = $this->printed();
+		self::assertStringContainsString('Consent provider  invalid:', $out);
+		self::assertStringContainsString('Credentials       invalid:', $out);
+		self::assertStringContainsString('Consent defaults  invalid:', $out);
+		self::assertStringContainsString('Credentials       invalid:', $out);
+		self::assertStringContainsString("Tag script\ninvalid:", $out, 'The rest of the report still prints.');
+	}
+
 	public function testStatusDescribesAParameterIdAndAMissingOne()
 	{
 		$app = Prado::getApplication();

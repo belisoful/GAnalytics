@@ -134,7 +134,7 @@ class GAnalyticsCookieConsentProvider extends TModule implements IGAnalyticsCons
 	 */
 	public function setCookieName($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$name = ($value === null) ? static::DEFAULT_COOKIE_NAME : \trim((string) TPropertyValue::ensureString($value));
 		if (!\preg_match('/^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$/', $name)) {
 			throw new TInvalidDataValueException('ganalytics_cookiename_invalid', $name);

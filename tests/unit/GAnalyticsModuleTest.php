@@ -284,6 +284,13 @@ class GAnalyticsModuleTest extends TestCase
 		$module->setContainerUrl('https://metrics.example.com/tag/gtm.js');
 		$module->setDataLayerName('siteData');
 		self::assertSame('<noscript><iframe src="https://metrics.example.com/tag/ns.html?id=GTM-ABC1234&amp;l=siteData" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>', $module->getContainerNoScriptHtml());
+		$module->setDataLayerName(null);
+		$module->setContainerUrl('https://metrics.example.com');
+		self::assertStringContainsString('src="https://metrics.example.com/ns.html?id=GTM-ABC1234"', $module->getContainerNoScriptHtml(), 'A host-only URL keeps its origin.');
+		$module->setContainerUrl('http://localhost:8080/');
+		self::assertStringContainsString('src="http://localhost:8080/ns.html?id=GTM-ABC1234"', $module->getContainerNoScriptHtml(), 'A trailing slash and a port survive.');
+		$module->setContainerUrl('https://metrics.example.com/a/b/');
+		self::assertStringContainsString('src="https://metrics.example.com/a/b/ns.html?id=GTM-ABC1234"', $module->getContainerNoScriptHtml(), 'A directory URL is the directory.');
 	}
 
 	public function testTheNoScriptFrameIsInsertedAtTheTopOfTheForm()
@@ -832,6 +839,9 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame('customer-42', $module->getEffectiveUserId(), 'The explicit id wins.');
 		$module->setUserId('');
 		self::assertNull($module->getUserId());
+		$module->setUserId('0');
+		self::assertSame('0', $module->getUserId(), "The id '0' is a value, not an empty one.");
+		self::assertSame('0', $module->getEffectiveUserId());
 	}
 
 	// =========================================================================
@@ -940,6 +950,25 @@ class GAnalyticsModuleTest extends TestCase
 			$cookies->remove($cookie);
 			$this->_app->setSession($previous);
 		}
+	}
+
+	public function testAnInactiveOrTaglessModuleDropsCallsInsteadOfDeferringThem()
+	{
+		$module = $this->probe();
+		$module->setEnabled(false);
+		$module->trackEvent('lost');
+		$module->trackEvent('lost_too', [], true);
+		self::assertSame([], $module->getQueuedCalls());
+		self::assertSame([], $module->deferred(), 'An inactive module never arms a page, so nothing waits in the session.');
+		self::assertSame([], $module->storeLookups, 'No session is touched.');
+
+		$module->setEnabled(true);
+		$module->setMeasurementId(null);
+		$module->getApplication()->getParameters()->remove($module->getMeasurementIdParameter());
+		self::assertFalse($module->getHasTag());
+		$module->gtag('event', 'lost');
+		self::assertSame([], $module->getQueuedCalls());
+		self::assertSame([], $module->storeLookups, 'Without a tag the same.');
 	}
 
 	public function testWithoutASessionDeferredCallsAreDropped()
@@ -1090,6 +1119,8 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame('abc', $module->getApiSecret());
 		$module->setApiSecret('');
 		self::assertNull($module->getApiSecret());
+		$module->setApiSecret(' 0 ');
+		self::assertSame('0', $module->getApiSecret(), "The secret '0' is a value, not an empty one.");
 	}
 
 	// =========================================================================
@@ -1121,6 +1152,12 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame("'self' NONCE", $csp->getPolicy(TCspDirective::DefaultSrc), 'default-src itself is untouched.');
 		self::assertSame("'none'", $csp->getPolicy(TCspDirective::FrameSrc));
 		self::assertFalse($module->amendCspHeader($csp), 'Amending again changes nothing.');
+
+		$csp = new THttpHeaderCsp();
+		$csp->setPolicies([TCspDirective::DefaultSrc => "'self'", TCspDirective::ScriptSrc => "'NONE'", TCspDirective::ConnectSrc => "'none' 'self'"]);
+		self::assertTrue($module->amendCspHeader($csp));
+		self::assertSame("https://*.googletagmanager.com", $csp->getPolicy(TCspDirective::ScriptSrc), "'none' is dropped when a source is added, whatever its case.");
+		self::assertSame("'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com", $csp->getPolicy(TCspDirective::ConnectSrc));
 	}
 
 	public function testAmendCspHeaderLeavesUnrestrictedAndRawPoliciesAlone()

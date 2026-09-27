@@ -69,7 +69,7 @@ A full configuration, with the parts described below:
         ConsentProvider="consent" ConsentDefaults='{"analytics_storage": "denied", "ad_storage": "denied", "ad_user_data": "denied", "ad_personalization": "denied"}'
         TrackExceptions="true" TrackLogins="true" TrackValidationErrors="true"
         ApiSecret="…" PropertyId="123456789" RealtimeMetrics="activeUsers, screenPageViews">
-        <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="protected/ga4-service-account.json" />
+        <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="ga4-service-account.json" />
     </module>
 </modules>
 ```
@@ -240,7 +240,7 @@ $module->sendEvent('refund', ['transaction_id' => $orderId, 'value' => 9.99, 'cu
 
 ## Reports (Data API) and administration (Admin API)
 
-The APIs need `PropertyId` (the numeric GA4 property id) and `Credentials`: an `IGAnalyticsCredentials`, a module id, or a `<credentials>` element. `GAnalyticsServiceAccountCredentials` is the server-to-server flow: a service account's JSON key (`KeyFile` or `Key`), the `Scopes` (read-only by default), a JWT signed with the key's RSA private key and exchanged for an access token, which is reused until a minute before it expires and shared through the application cache. `GAnalyticsAccessTokenCredentials` holds a token obtained elsewhere; a user-consent OAuth flow belongs with PRADO's user manager and plugs in through the interface.
+The APIs need `PropertyId` (the numeric GA4 property id) and `Credentials`: an `IGAnalyticsCredentials`, a module id, or a `<credentials>` element. `GAnalyticsServiceAccountCredentials` is the server-to-server flow: a service account's JSON key (`KeyFile`, a path resolved against the application's base path, the `protected` directory, when it is relative; or `Key`, the content), the `Scopes` (read-only by default), a JWT signed with the key's RSA private key and exchanged for an access token, which is reused until a minute before it expires and shared through the application cache. `GAnalyticsAccessTokenCredentials` holds a token obtained elsewhere; a user-consent OAuth flow belongs with PRADO's user manager and plugs in through the interface.
 
 ```php
 $report = $module->runReport(['activeUsers', 'screenPageViews'], ['pagePath'], '7daysAgo', 'today', ['limit' => 20]);

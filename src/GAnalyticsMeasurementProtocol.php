@@ -190,7 +190,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	 */
 	public function setMeasurementId($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_measurementId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
@@ -207,7 +207,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	 */
 	public function setApiSecret($value)
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_apiSecret = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
@@ -254,7 +254,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	 */
 	protected function ensureEndpoint($value, string $default): string
 	{
-		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		if ($value === null) {
 			return $default;
 		}

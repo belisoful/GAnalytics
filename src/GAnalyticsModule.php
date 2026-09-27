@@ -10,9 +10,14 @@
 
 namespace belisoful\GAnalytics;
 
+use Prado\Exceptions\TConfigurationException;
+use Prado\Exceptions\THttpException;
 use Prado\Exceptions\TInvalidDataValueException;
 use Prado\Prado;
 use Prado\Security\IUser;
+use Prado\Security\TAuthManager;
+use Prado\Shell\TShellAction;
+use Prado\Shell\TShellApplication;
 use Prado\TApplication;
 use Prado\TApplicationMode;
 use Prado\TComponent;
@@ -26,90 +31,95 @@ use Prado\Web\HttpHeaders\THttpHeadersManager;
 use Prado\Web\Javascripts\TJavaScript;
 use Prado\Web\Services\TPageService;
 use Prado\Web\THttpRequest;
+use Prado\Web\THttpSession;
 use Prado\Web\UI\TPage;
+use Prado\Web\UI\WebControls\TLiteral;
+use Prado\Xml\TXmlElement;
 
 /**
  * GAnalyticsModule class.
  *
- * Adds the Google tag (gtag.js) for Google Analytics 4 to every page of a PRADO application.
- * Once configured, the module registers the asynchronous `gtag/js` script file and the
- * `gtag('config', …)` block in the page head of each page the {@see TPageService} runs, so a
- * page view is measured under the configured {@see getMeasurementId() MeasurementId}.
- *
- * The Measurement ID is taken from the module property, or, when the property is unset, from
- * the application parameter named by {@see getMeasurementIdParameter() MeasurementIdParameter}
- * (`GoogleAnalyticsMeasurementId` by default), so one configuration can serve several
- * deployments. A page runs without the tag when the module is {@see getEnabled() disabled},
- * when the application mode is outside {@see setEnabledModes() EnabledModes}, when no
- * Measurement ID resolves (logged as a notice), or when a handler of
- * {@see onPreRegisterScript} stops the event.
- *
- * The tag is configured by these properties:
- *  - {@see setDebugMode() DebugMode} sets `debug_mode: true`, so hits show in the GA4 DebugView;
- *  - {@see setSendPageView() SendPageView} `false` sets `send_page_view: false`, for applications
- *    that send their own `page_view` events;
- *  - {@see setConfigOptions() ConfigOptions} holds any other `gtag('config')` parameters, as an
- *    array or a JSON object string;
- *  - {@see setConsentDefaults() ConsentDefaults} emits a `gtag('consent', 'default', …)` call
- *    before the configuration, for Consent Mode;
- *  - {@see setAdditionalMeasurementIds() AdditionalMeasurementIds} configures further tags
- *    (a Google Ads `AW-` id, a second property) on the same page;
- *  - {@see setPagePathAsContentGroup() PagePathAsContentGroup} reports the PRADO page path
- *    (`Admin.Users`) as the GA4 `content_group`;
- *  - {@see setUserId() UserId} and {@see setUserIdFromUser() UserIdFromUser} set the GA4
- *    `user_id`; the latter derives it from the authenticated PRADO {@see IUser} as an HMAC of the
- *    user name under the security manager's validation key, so no name reaches Google;
- *  - {@see setTagUrl() TagUrl} and {@see setDataLayerName() DataLayerName} point the script file
- *    at a first-party or server-side tagging host and rename the data layer.
- *
- * Page code sends events through {@see trackEvent()}, {@see updateConsent()},
- * {@see setUserProperties()} and {@see gtag()}. A call queued during the page's life is
- * delivered at {@see TPage::onPreRenderComplete}: on a full page as a script block at the end of
- * the form, on a callback request through the page's {@see TPage::getCallbackClient() callback
- * client}, so an ActiveControl handler measures an event without a page load. A call marked
- * deferred, or made while no page is running or after the page's calls were delivered, is kept
- * in the session and delivered on the next page, which carries an event across a redirect. The
- * {@see GAnalyticsPageBehavior} class behavior, attached to {@see TPage} when
- * {@see setAttachPageBehavior() AttachPageBehavior} is true, offers the same methods on the page
- * (`$this->trackEvent(…)`).
- *
- * Events without a browser (a shell command, a cron job, an API request) go through the
- * Measurement Protocol: {@see sendEvent()} posts to Google with the
- * {@see setApiSecret() ApiSecret}, under the visitor's client id from the `_ga` cookie when the
- * request has one ({@see getClientId()}). {@see getMeasurementProtocol()} is the client for
- * batches.
- *
- * With {@see setAmendCsp() AmendCsp} (the default) the module adds Google's hosts to the
- * `script-src`, `connect-src` and `img-src` directives of every {@see THttpHeaderCsp} a
- * {@see THttpHeadersManager} in the application carries, when that directive or `default-src`
- * restricts the source, so a Content Security Policy keeps working with the tag. PRADO's per-request
- * CSP nonce is emitted on the tag's script elements by {@see TJavaScript}.
- *
- * The script is registered in the page head, which {@see \Prado\Web\UI\WebControls\THead} renders.
- * A page without a `THead` gets the same script at the beginning of its form instead. A callback
- * request renders neither, so the tag loads once per page and never again on a callback.
- *
- * The extension is a Composer package with an `extra.prado.bootstrap` entry, so the module is
- * configured by its package name, without a class. Its Prado3 short name `GAnalyticsModule` comes
- * from `config/classMap.json` and its error codes from `config/errorMessages.txt`, both registered
- * by Composer from `extra.prado`.
+ * Google Analytics 4 for a PRADO application. The module puts the Google tag on every page the
+ * {@see TPageService} runs, sends events from PHP for pages, callbacks and code without a browser,
+ * reads reports back through the Data API, and hooks the application's own events. Every part is
+ * a property or a method on this one module, configured by the package name:
  *
  * ```xml
  * <modules>
- *     <module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" UserIdFromUser="true"
- *         PagePathAsContentGroup="true" EnabledModes="Normal, Performance" />
+ *     <module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" ContainerId="GTM-XXXXXXX"
+ *         UserIdFromUser="true" PagePathAsContentGroup="true" EnabledModes="Normal, Performance"
+ *         TrackExceptions="true" TrackLogins="true" TrackValidationErrors="true"
+ *         ApiSecret="…" PropertyId="123456789" ConsentProvider="consent">
+ *         <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="protected/ga4-key.json" />
+ *     </module>
  * </modules>
  * ```
  *
- * ```php
- * 'modules' => [
- *     'belisoful/ganalytics' => ['properties' => [
- *         'MeasurementIdParameter' => 'GA4MeasurementId',
- *         'ConsentDefaults' => ['ad_storage' => 'denied', 'analytics_storage' => 'denied'],
- *         'ApiSecret' => getenv('GA4_API_SECRET'),
- *     ]],
- * ],
- * ```
+ * **The tag.** With a {@see getMeasurementId() MeasurementId} (the property, or the application
+ * parameter {@see getMeasurementIdParameter() MeasurementIdParameter}) the page head gets the
+ * asynchronous `gtag/js` script and the `gtag('config', …)` block; with a
+ * {@see setContainerId() ContainerId} it gets the Google Tag Manager loader and, at the top of the
+ * form, the container's `<noscript>` frame; with both, the two. The tag is configured by
+ * {@see setDebugMode() DebugMode}, {@see setSendPageView() SendPageView},
+ * {@see setConfigOptions() ConfigOptions}, {@see setConsentDefaults() ConsentDefaults},
+ * {@see setAdditionalMeasurementIds() AdditionalMeasurementIds},
+ * {@see setPagePathAsContentGroup() PagePathAsContentGroup} (the PRADO page path as the GA4
+ * `content_group`), {@see setUserId() UserId} and {@see setUserIdFromUser() UserIdFromUser} (the
+ * `user_id` as an HMAC of the authenticated {@see IUser}'s name under the security manager's
+ * validation key), {@see setTagUrl() TagUrl}, {@see setContainerUrl() ContainerUrl} and
+ * {@see setDataLayerName() DataLayerName}. A page runs without the tag when the module is
+ * {@see getEnabled() disabled}, when the application mode is outside
+ * {@see setEnabledModes() EnabledModes}, when neither id resolves (logged as a notice), or when a
+ * handler of {@see onPreRegisterScript} stops the event. The tag is armed at
+ * {@see TPageService::onPreRunPage} and registered at {@see TPage::onPreRenderComplete}, when the
+ * page knows its head: {@see \Prado\Web\UI\WebControls\THead} renders the head registrations,
+ * and a page without one gets the scripts at the beginning of its form. A callback request gets
+ * no tag, so the tag loads once per page.
+ *
+ * **Events from pages.** {@see trackEvent()}, {@see updateConsent()}, {@see setUserProperties()}
+ * and {@see gtag()} queue calls delivered at {@see TPage::onPreRenderComplete}: on a full page as
+ * a script block at the end of the form, on a callback request through the page's
+ * {@see TPage::getCallbackClient() callback client}. A deferred call, or one made while no page
+ * is registered or after the page's calls were delivered, waits in the session for the next page,
+ * so an event survives a redirect. Without a Measurement ID (a container only) an event is a
+ * `dataLayer.push({event: …})` for the container's triggers. The {@see GAnalyticsPageBehavior}
+ * class behavior, attached to {@see TPage} when {@see setAttachPageBehavior() AttachPageBehavior}
+ * is true, offers the same methods on the page (`$this->trackEvent(…)`).
+ *
+ * **PRADO events.** {@see setTrackExceptions() TrackExceptions} sends an `exception` event over
+ * the Measurement Protocol from {@see TApplication::onError}; {@see setTrackLogins() TrackLogins}
+ * queues `login`, `login_failed` and `logout` from every {@see TAuthManager};
+ * {@see setTrackValidationErrors() TrackValidationErrors} queues a `form_error` event for a
+ * postback whose validators failed.
+ *
+ * **Consent.** {@see setConsentProvider() ConsentProvider} names an {@see IGAnalyticsConsentProvider}
+ * (a module id or an instance) whose state for the visitor overrides the configured defaults in
+ * `gtag('consent', 'default', …)`; when it is an {@see IGAnalyticsConsentStore},
+ * {@see updateConsent()} records the choice. {@see GAnalyticsCookieConsentProvider} is the
+ * cookie-backed one.
+ *
+ * **Server side.** {@see sendEvent()} posts an event over the Measurement Protocol with the
+ * {@see setApiSecret() ApiSecret}, under the visitor's `_ga` client id when the request has one
+ * ({@see getClientId()}); {@see getMeasurementProtocol()} is the client for batches.
+ * {@see runReport()}, {@see runRealtimeReport()}, {@see getDataApi()} and {@see getAdminApi()}
+ * read the property {@see setPropertyId() PropertyId} with the {@see setCredentials() Credentials}
+ * (an {@see IGAnalyticsCredentials}, a module id, or a `<credentials>` element). {@see pollRealtime()}
+ * runs the {@see setRealtimeMetrics() RealtimeMetrics} report and raises {@see onRealtimeReport},
+ * for a `TCronModule` job (`task="belisoful/ganalytics->pollRealtime"`) that publishes live
+ * figures through the application's own channel.
+ *
+ * **Framework services.** With {@see setAmendCsp() AmendCsp} (the default) the module adds
+ * Google's hosts to the `script-src`, `connect-src` and `img-src` directives of every
+ * {@see THttpHeaderCsp} in the application's {@see THttpHeadersManager} modules;
+ * {@see TJavaScript} emits PRADO's per-request nonce on the tag's script elements. In a
+ * {@see TShellApplication} the module registers `prado-cli ganalytics/*`
+ * ({@see GAnalyticsShellAction}). Time comes from PRADO's clock. Every value written into a page
+ * is JavaScript-encoded.
+ *
+ * The extension is a Composer package with an `extra.prado.bootstrap` entry, so the module is
+ * configured by its package name, without a class. Its Prado3 short names come from
+ * `config/classMap.json` and its error codes from `config/errorMessages.txt`, both registered by
+ * Composer from `extra.prado`.
  *
  * @author Brad Anderson <belisoful@icloud.com>
  */
@@ -135,6 +145,24 @@ class GAnalyticsModule extends TPluginModule
 
 	/** The session key holding the deferred calls. */
 	public const SESSION_KEY = 'belisoful/ganalytics:deferred';
+
+	/** The default Google Tag Manager loader URL; the container id is appended as its `id` query parameter. */
+	public const DEFAULT_CONTAINER_URL = 'https://www.googletagmanager.com/gtm.js';
+
+	/** The ID of the `<noscript>` literal inserted at the top of the form for a container. */
+	public const NOSCRIPT_ID = 'gtmNoScript';
+
+	/** The accepted container id form. */
+	public const CONTAINER_ID_PATTERN = '/^GTM-[A-Z0-9]{4,12}$/';
+
+	/** The default shell action class registered with a {@see TShellApplication}. */
+	public const DEFAULT_SHELL_CLASS = GAnalyticsShellAction::class;
+
+	/** The default `method` parameter of the `login`, `login_failed` and `logout` events. */
+	public const DEFAULT_LOGIN_METHOD = 'form';
+
+	/** The longest GA4 event parameter value, in characters. */
+	public const PARAM_MAX_LENGTH = 100;
 
 	/**
 	 * The accepted Measurement ID form: a one to three letter prefix (`G`, `AW`, `DC`, `GT`, `UA`), a dash,
@@ -215,6 +243,54 @@ class GAnalyticsModule extends TPluginModule
 	/** @var ?GAnalyticsMeasurementProtocol The Measurement Protocol client, created on first use. */
 	private ?GAnalyticsMeasurementProtocol $_measurementProtocol = null;
 
+	/** @var ?string The Google Tag Manager container id. */
+	private ?string $_containerId = null;
+
+	/** @var string The Google Tag Manager loader URL, without the `id` parameter. */
+	private string $_containerUrl = self::DEFAULT_CONTAINER_URL;
+
+	/** @var bool Whether the container's `<noscript>` frame is inserted at the top of the form. */
+	private bool $_containerNoScript = true;
+
+	/** @var bool Whether {@see TApplication::onError} sends an `exception` event. */
+	private bool $_trackExceptions = false;
+
+	/** @var bool Whether {@see TAuthManager} logins, failures and logouts queue events. */
+	private bool $_trackLogins = false;
+
+	/** @var bool Whether a postback with failed validators queues a `form_error` event. */
+	private bool $_trackValidationErrors = false;
+
+	/** @var string The `method` parameter of the login events. */
+	private string $_loginMethod = self::DEFAULT_LOGIN_METHOD;
+
+	/** @var null|IGAnalyticsConsentProvider|string The consent provider, or the id of the module that is one. */
+	private null|IGAnalyticsConsentProvider|string $_consentProvider = null;
+
+	/** @var ?string The GA4 property id the Data API reads. */
+	private ?string $_propertyId = null;
+
+	/** @var null|IGAnalyticsCredentials|string The API credentials, or the id of the module that is them. */
+	private null|IGAnalyticsCredentials|string $_credentials = null;
+
+	/** @var ?GAnalyticsDataApi The Data API client, created on first use. */
+	private ?GAnalyticsDataApi $_dataApi = null;
+
+	/** @var ?GAnalyticsAdminApi The Admin API client, created on first use. */
+	private ?GAnalyticsAdminApi $_adminApi = null;
+
+	/** @var string[] The metrics of the realtime poll. */
+	private array $_realtimeMetrics = ['activeUsers'];
+
+	/** @var string[] The dimensions of the realtime poll. */
+	private array $_realtimeDimensions = [];
+
+	/** @var string The shell action class registered with a shell application. */
+	private string $_shellClass = self::DEFAULT_SHELL_CLASS;
+
+	/** @var bool Whether {@see attachPageServiceHandler()} hooked the application. */
+	private bool $_hooked = false;
+
 	/** @var array<int, array<int, mixed>> The gtag calls queued for the current page. */
 	private array $_calls = [];
 
@@ -229,13 +305,31 @@ class GAnalyticsModule extends TPluginModule
 	// =========================================================================
 
 	/**
-	 * Initializes the module and hooks the page service. When the application is already
-	 * initialized (a lazily loaded module) the page service is hooked at once; otherwise the hook
-	 * waits for {@see TApplication::onInitComplete}, when the service exists.
-	 * @param null|array|\Prado\Xml\TXmlElement $config The module configuration.
+	 * Initializes the module: creates the {@see setCredentials() Credentials} from a
+	 * `<credentials>` child element (or the `credentials` key of an array configuration) and the
+	 * {@see setConsentProvider() ConsentProvider} from a `<consent>` element (or `consent` key),
+	 * then hooks the application. When the application is already initialized (a lazily loaded
+	 * module) it is hooked at once; otherwise the hook waits for {@see TApplication::onInitComplete},
+	 * when every module and the service exist.
+	 * @param null|array|TXmlElement $config The module configuration.
 	 */
 	public function init($config)
 	{
+		if ($config instanceof TXmlElement) {
+			foreach ($config->getElementsByTagName('credentials') as $element) {
+				$this->setCredentials($element->getAttributes()->toArray());
+			}
+			foreach ($config->getElementsByTagName('consent') as $element) {
+				$this->setConsentProvider($element->getAttributes()->toArray());
+			}
+		} elseif (is_array($config)) {
+			if (isset($config['credentials']) && is_array($config['credentials'])) {
+				$this->setCredentials($config['credentials']);
+			}
+			if (isset($config['consent']) && is_array($config['consent'])) {
+				$this->setConsentProvider($config['consent']);
+			}
+		}
 		parent::init($config);
 
 		$app = $this->getApplication();
@@ -247,15 +341,23 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Hooks the application once every module exists: attaches {@see preRunPageHandler()} to the
-	 * {@see TPageService::onPreRunPage} event of the running page service, attaches the
-	 * {@see GAnalyticsPageBehavior} ({@see attachPageBehavior()}) and amends the Content Security
-	 * Policy ({@see amendCspPolicies()}). A service that is not a page service is left alone.
+	 * Hooks the application once every module exists, once per module: attaches
+	 * {@see preRunPageHandler()} to the {@see TPageService::onPreRunPage} event of the running
+	 * page service (a service that is not a page service is left alone), attaches the
+	 * {@see GAnalyticsPageBehavior} ({@see attachPageBehavior()}), amends the Content Security
+	 * Policy ({@see amendCspPolicies()}), hooks {@see TApplication::onError} and the
+	 * {@see TAuthManager} events the `Track*` properties ask for, and registers the shell action
+	 * with a {@see TShellApplication} ({@see registerShellAction()}).
 	 * @param mixed $sender The application raising {@see TApplication::onInitComplete}.
 	 * @param mixed $param The event parameter.
 	 */
 	public function attachPageServiceHandler($sender, $param)
 	{
+		if ($this->_hooked) {
+			return;
+		}
+		$this->_hooked = true;
+		$app = $this->getApplication();
 		$service = $this->getService();
 		if ($service instanceof TPageService) {
 			$service->attachEventHandler('onPreRunPage', [$this, 'preRunPageHandler']);
@@ -266,10 +368,167 @@ class GAnalyticsModule extends TPluginModule
 		if ($this->getAmendCsp()) {
 			$this->amendCspPolicies();
 		}
+		if ($this->getTrackExceptions()) {
+			$app->attachEventHandler('onError', [$this, 'errorHandler']);
+		}
+		if ($this->getTrackLogins()) {
+			foreach ($this->getAuthManagers() as $manager) {
+				$manager->attachEventHandler('onLogin', [$this, 'loginHandler']);
+				$manager->attachEventHandler('onLoginFailed', [$this, 'loginFailedHandler']);
+				$manager->attachEventHandler('onLogout', [$this, 'logoutHandler']);
+			}
+		}
+		$this->registerShellAction();
 	}
 
 	/**
-	 * The {@see TPageService::onPreRunPage} handler: registers the tag on the page about to run.
+	 * Returns the {@see TAuthManager} modules of the application, lazily loaded ones included.
+	 * @return TAuthManager[] The authentication managers, indexed by module id.
+	 */
+	public function getAuthManagers(): array
+	{
+		$app = $this->getApplication();
+		$managers = [];
+		foreach ($app->getModulesByType(TAuthManager::class) as $id => $manager) {
+			$manager ??= $app->getModule($id);
+			if ($manager instanceof TAuthManager) {
+				$managers[$id] = $manager;
+			}
+		}
+		return $managers;
+	}
+
+	/**
+	 * Registers the {@see getShellClass() ShellClass} action with a {@see TShellApplication}, so
+	 * `prado-cli ganalytics/<action>` drives this module. A web application is left alone.
+	 * @return bool Whether the action was registered.
+	 */
+	public function registerShellAction(): bool
+	{
+		$app = $this->getApplication();
+		if (!($app instanceof TShellApplication) || $app->hasShellActionClass($this->getShellClass())) {
+			return false;
+		}
+		$app->addShellActionClass(['class' => $this->getShellClass(), 'Module' => $this]);
+		return true;
+	}
+
+	// =========================================================================
+	// PRADO event handlers
+	// =========================================================================
+
+	/**
+	 * The {@see TApplication::onError} handler: sends an `exception` event over the Measurement
+	 * Protocol with `description` (the class and message, cut to {@see PARAM_MAX_LENGTH}),
+	 * `fatal`, `error_type`, and `status_code` for a {@see THttpException}. The page will not
+	 * render, so the event goes server side. Without an {@see getApiSecret() ApiSecret} a notice
+	 * is logged. A failure to send is logged and never disturbs the error handling.
+	 * @param mixed $sender The application.
+	 * @param mixed $param The throwable.
+	 * @return bool Whether the event was sent.
+	 */
+	public function errorHandler($sender, $param): bool
+	{
+		if (!($param instanceof \Throwable)) {
+			return false;
+		}
+		if ($this->getApiSecret() === null) {
+			Prado::log('TrackExceptions needs an ApiSecret; the exception was not reported.', TLogger::NOTICE, static::class);
+			return false;
+		}
+		try {
+			return $this->sendEvent('exception', $this->getExceptionParams($param));
+		} catch (\Throwable $e) {
+			Prado::log('Reporting an exception to Google Analytics failed: ' . $e->getMessage(), TLogger::WARNING, static::class);
+			return false;
+		}
+	}
+
+	/**
+	 * Returns the `exception` event parameters for a throwable.
+	 * @param \Throwable $exception The throwable.
+	 * @return array<string, mixed> `description`, `fatal`, `error_type`, and `status_code` for a {@see THttpException}.
+	 */
+	public function getExceptionParams(\Throwable $exception): array
+	{
+		$type = (new \ReflectionClass($exception))->getShortName();
+		$params = [
+			'description' => mb_substr($type . ': ' . $exception->getMessage(), 0, static::PARAM_MAX_LENGTH),
+			'fatal' => true,
+			'error_type' => mb_substr($type, 0, static::PARAM_MAX_LENGTH),
+		];
+		if ($exception instanceof THttpException) {
+			$params['status_code'] = (int) $exception->getStatusCode();
+		}
+		return $params;
+	}
+
+	/**
+	 * The {@see TAuthManager::onLogin} handler: queues a deferred `login` event with the
+	 * {@see getLoginMethod() LoginMethod}, delivered on the next page since a login is usually
+	 * followed by a redirect.
+	 * @param mixed $sender The authentication manager.
+	 * @param mixed $param The user logged in.
+	 */
+	public function loginHandler($sender, $param)
+	{
+		$this->trackEvent('login', ['method' => $this->getLoginMethod()], true);
+	}
+
+	/**
+	 * The {@see TAuthManager::onLoginFailed} handler: queues a `login_failed` event with the
+	 * {@see getLoginMethod() LoginMethod} for the current page, which a failed login re-renders.
+	 * The user name is not sent.
+	 * @param mixed $sender The authentication manager.
+	 * @param mixed $param The user name that failed.
+	 */
+	public function loginFailedHandler($sender, $param)
+	{
+		$this->trackEvent('login_failed', ['method' => $this->getLoginMethod()]);
+	}
+
+	/**
+	 * The {@see TAuthManager::onLogout} handler: queues a deferred `logout` event, delivered on the next page.
+	 * @param mixed $sender The authentication manager.
+	 * @param mixed $param The user logged out.
+	 */
+	public function logoutHandler($sender, $param)
+	{
+		$this->trackEvent('logout', [], true);
+	}
+
+	/**
+	 * Queues a `form_error` event when a postback's validators failed: `form_id` is the page
+	 * path, `error_count` the number of failed validators, `validators` their IDs (cut to
+	 * {@see PARAM_MAX_LENGTH}). Called at {@see TPage::onPreRenderComplete} with
+	 * {@see getTrackValidationErrors() TrackValidationErrors}.
+	 * @param TPage $page The page that ran.
+	 * @return bool Whether an event was queued.
+	 */
+	public function trackValidationErrors(TPage $page): bool
+	{
+		if (!$page->getIsPostBack()) {
+			return false;
+		}
+		$failed = [];
+		foreach ($page->getValidators() as $validator) {
+			if (!$validator->getIsValid()) {
+				$failed[] = (string) $validator->getID();
+			}
+		}
+		if (count($failed) === 0) {
+			return false;
+		}
+		$this->queueCall(['event', 'form_error', [
+			'form_id' => (string) $page->getPagePath(),
+			'error_count' => count($failed),
+			'validators' => mb_substr(implode(',', $failed), 0, static::PARAM_MAX_LENGTH),
+		]]);
+		return true;
+	}
+
+	/**
+	 * The {@see TPageService::onPreRunPage} handler: arms the tag for the page about to run.
 	 * @param mixed $sender The page service raising the event.
 	 * @param mixed $param The {@see TPage} about to run.
 	 */
@@ -281,23 +540,25 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Registers the Google tag script file and configuration block in the head of a page, and
-	 * makes the page the destination of the queued calls. Registration is skipped, returning
-	 * false, when the module is {@see getIsActive() inactive}, when no Measurement ID resolves (a
-	 * notice is logged), or when a handler of {@see onPreRegisterScript} stops the event. A page
-	 * without a `THead` receives the scripts at the beginning of its form at
-	 * {@see TPage::onPreRenderComplete} instead; a callback request renders neither.
-	 * @param TPage $page The page to register the tag on.
+	 * Arms the tag for a page: the page becomes the destination of the queued calls, and at its
+	 * {@see TPage::onPreRenderComplete} the tag is registered ({@see registerTag()}), failed
+	 * validators are tracked and the calls are delivered ({@see preRenderCompleteHandler()}).
+	 * Nothing is armed, returning false, when the module is {@see getIsActive() inactive}, when
+	 * neither a Measurement ID nor a container id resolves (a notice is logged), or when a
+	 * handler of {@see onPreRegisterScript} stops the event. Registration waits for
+	 * `onPreRenderComplete` because only then the page knows whether it has a `THead`; a head
+	 * registration on a page without one is refused by PRADO.
+	 * @param TPage $page The page to put the tag on.
 	 * @throws TInvalidDataValueException When the Measurement ID read from the application parameter is not valid.
-	 * @return bool Whether the tag was registered.
+	 * @return bool Whether the tag was armed for the page.
 	 */
 	public function registerPageScripts(TPage $page): bool
 	{
 		if (!$this->getIsActive()) {
 			return false;
 		}
-		if ($this->getMeasurementId() === null) {
-			Prado::log('No Google tag Measurement ID is configured; the page runs without the tag.', TLogger::NOTICE, static::class);
+		if (!$this->getHasTag()) {
+			Prado::log('No Google tag Measurement ID or container id is configured; the page runs without the tag.', TLogger::NOTICE, static::class);
 			return false;
 		}
 		$param = new TEventParameter($page);
@@ -305,9 +566,6 @@ class GAnalyticsModule extends TPluginModule
 		if ($param->getStopped()) {
 			return false;
 		}
-		$cs = $page->getClientScript();
-		$cs->registerHeadScriptFile(static::SCRIPT_KEY, $this->getTagScriptUrl(), true);
-		$cs->registerHeadScript(static::SCRIPT_KEY, $this->getTagScript($page));
 		$page->attachEventHandler('onPreRenderComplete', [$this, 'preRenderCompleteHandler']);
 		$this->_page = $page;
 		$this->_flushed = false;
@@ -315,10 +573,42 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * The {@see TPage::onPreRenderComplete} handler: a page without a `THead` never renders its
-	 * head scripts, so the tag is registered at the beginning of the form instead (a callback
-	 * request is left alone: its response would run the tag a second time). Then the queued
-	 * calls are delivered ({@see flushCalls()}).
+	 * Registers the tag on a page's client script manager: with a `THead`, the asynchronous
+	 * `gtag/js` script file (with a Measurement ID) and the script block in the head; without one,
+	 * the same at the beginning of the form. With a container and
+	 * {@see getContainerNoScript() ContainerNoScript}, the `<noscript>` frame
+	 * ({@see getContainerNoScriptHtml()}) is inserted at the top of the form.
+	 * @param TPage $page The page, after its controls initialized so its head and form are known.
+	 */
+	public function registerTag(TPage $page): void
+	{
+		$cs = $page->getClientScript();
+		if ($page->getHead() !== null) {
+			if ($this->getUsesGtag()) {
+				$cs->registerHeadScriptFile(static::SCRIPT_KEY, $this->getTagScriptUrl(), true);
+			}
+			$cs->registerHeadScript(static::SCRIPT_KEY, $this->getTagScript($page));
+		} else {
+			if ($this->getUsesGtag()) {
+				$cs->registerScriptFile(static::SCRIPT_KEY, $this->getTagScriptUrl());
+			}
+			$cs->registerBeginScript(static::SCRIPT_KEY, $this->getTagScript($page));
+		}
+		if ($this->getContainerId() !== null && $this->getContainerNoScript() && ($form = $page->getForm()) !== null) {
+			$literal = new TLiteral();
+			$literal->setID(static::NOSCRIPT_ID);
+			$literal->setEncode(false);
+			$literal->setText($this->getContainerNoScriptHtml());
+			$form->getControls()->insertAt(0, $literal);
+		}
+	}
+
+	/**
+	 * The {@see TPage::onPreRenderComplete} handler of an armed page: registers the tag
+	 * ({@see registerTag()}) on a full page (a callback request renders no head and would run
+	 * the tag a second time, so it gets none), tracks failed validators
+	 * ({@see trackValidationErrors()}) with {@see getTrackValidationErrors() TrackValidationErrors},
+	 * and delivers the queued calls ({@see flushCalls()}).
 	 * @param mixed $sender The page raising the event.
 	 * @param mixed $param The event parameter.
 	 */
@@ -327,10 +617,11 @@ class GAnalyticsModule extends TPluginModule
 		if (!($sender instanceof TPage)) {
 			return;
 		}
-		if ($sender->getHead() === null && !$sender->getIsCallback()) {
-			$cs = $sender->getClientScript();
-			$cs->registerScriptFile(static::SCRIPT_KEY, $this->getTagScriptUrl());
-			$cs->registerBeginScript(static::SCRIPT_KEY, $this->getTagScript($sender));
+		if (!$sender->getIsCallback()) {
+			$this->registerTag($sender);
+		}
+		if ($this->getTrackValidationErrors()) {
+			$this->trackValidationErrors($sender);
 		}
 		$this->flushCalls($sender);
 	}
@@ -443,19 +734,24 @@ class GAnalyticsModule extends TPluginModule
 
 	/**
 	 * Returns the hosts a Content Security Policy needs for the tag, by directive:
-	 * {@see CSP_SOURCES}, plus the {@see getTagUrl() TagUrl} origin under `script-src`,
-	 * `connect-src` and `img-src` when it is not a Google Tag Manager host.
+	 * {@see CSP_SOURCES}, plus the {@see getTagUrl() TagUrl} and {@see getContainerUrl() ContainerUrl}
+	 * origins under `script-src`, `connect-src` and `img-src` when they are not Google Tag Manager hosts.
 	 * @return array<string, string[]> The sources by directive name.
 	 */
 	public function getCspSources(): array
 	{
 		$sources = static::CSP_SOURCES;
-		$parts = parse_url($this->getTagUrl());
-		$host = strtolower($parts['host'] ?? '');
-		if ($host !== '' && $host !== 'googletagmanager.com' && !str_ends_with($host, '.googletagmanager.com')) {
+		foreach ([$this->getTagUrl(), $this->getContainerUrl()] as $url) {
+			$parts = parse_url($url);
+			$host = strtolower($parts['host'] ?? '');
+			if ($host === '' || $host === 'googletagmanager.com' || str_ends_with($host, '.googletagmanager.com')) {
+				continue;
+			}
 			$origin = ($parts['scheme'] ?? 'https') . '://' . $host . (isset($parts['port']) ? ':' . $parts['port'] : '');
 			foreach ($sources as $directive => $list) {
-				$sources[$directive][] = $origin;
+				if (!in_array($origin, $list, true)) {
+					$sources[$directive][] = $origin;
+				}
 			}
 		}
 		return $sources;
@@ -485,13 +781,22 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Queues a `gtag('consent', 'update', $params)` call, for a visitor's consent choice.
+	 * Queues a `gtag('consent', 'update', $params)` call for a visitor's consent choice, and
+	 * records the choice when the {@see getConsentProvider() ConsentProvider} is an
+	 * {@see IGAnalyticsConsentStore}, so the next page's defaults carry it.
 	 * @param array<string, mixed> $params The consent parameters, such as `['analytics_storage' => 'granted']`.
 	 * @param bool $deferred Whether the call is delivered on the next page instead of this one.
 	 */
 	public function updateConsent(array $params, bool $deferred = false): void
 	{
 		$this->queueCall(['consent', 'update', $params], $deferred);
+		$provider = $this->getConsentProvider();
+		if ($provider instanceof IGAnalyticsConsentStore) {
+			$state = GAnalyticsCookieConsentProvider::normalizeState($params);
+			if (count($state) > 0) {
+				$provider->setConsentState($state);
+			}
+		}
 	}
 
 	/**
@@ -543,9 +848,9 @@ class GAnalyticsModule extends TPluginModule
 
 	/**
 	 * Delivers the queued calls, the deferred ones from the session first, on a page: on a
-	 * callback request each call runs through the page's callback client as
-	 * `gtag(…)`; otherwise the calls are registered as one script block at the end of the form.
-	 * Later calls in this request are deferred to the next page.
+	 * callback request each call runs through the page's callback client, as `gtag(…)` or as the
+	 * data layer push of a container-only event; otherwise the calls are registered as one script
+	 * block at the end of the form. Later calls in this request are deferred to the next page.
 	 * @param TPage $page The page receiving the calls.
 	 * @return int The number of calls delivered.
 	 */
@@ -560,7 +865,11 @@ class GAnalyticsModule extends TPluginModule
 		if ($page->getIsCallback()) {
 			$client = $page->getCallbackClient();
 			foreach ($calls as $args) {
-				$client->callClientFunction('gtag', $args);
+				if ($this->isDataLayerCall($args)) {
+					$client->evaluateScript($this->getCallsScript([$args]));
+				} else {
+					$client->callClientFunction('gtag', $args);
+				}
 			}
 		} else {
 			$page->getClientScript()->registerEndScript(static::CALLS_SCRIPT_KEY, $this->getCallsScript($calls));
@@ -569,8 +878,8 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Renders gtag calls as JavaScript, one `gtag(…);` statement per line with every argument
-	 * JavaScript-encoded.
+	 * Renders gtag calls as JavaScript, one statement per line with every argument
+	 * JavaScript-encoded: `gtag(…);`, or a `dataLayer.push({event: …});` for a container-only event.
 	 * @param array<int, array<int, mixed>> $calls The calls, each an argument list.
 	 * @return string The script, without `<script>` tags.
 	 */
@@ -578,9 +887,25 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$lines = [];
 		foreach ($calls as $args) {
-			$lines[] = 'gtag(' . implode(', ', array_map(fn ($arg) => TJavaScript::encode($arg), $args)) . ');';
+			if ($this->isDataLayerCall($args)) {
+				$event = ['event' => $args[1]] + (is_array($args[2] ?? null) ? $args[2] : []);
+				$lines[] = $this->getDataLayerName() . '.push(' . TJavaScript::encode($event) . ');';
+			} else {
+				$lines[] = 'gtag(' . implode(', ', array_map(fn ($arg) => TJavaScript::encode($arg), $args)) . ');';
+			}
 		}
 		return implode("\n", $lines);
+	}
+
+	/**
+	 * Whether a call is delivered as a data layer push: an `event` command when the page has a
+	 * container and no Measurement ID, so Tag Manager's triggers see the event.
+	 * @param array<int, mixed> $args The gtag arguments.
+	 * @return bool Whether the call is a data layer push.
+	 */
+	public function isDataLayerCall(array $args): bool
+	{
+		return ($args[0] ?? null) === 'event' && is_string($args[1] ?? null) && !$this->getUsesGtag() && $this->getContainerId() !== null;
 	}
 
 	/**
@@ -589,7 +914,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	protected function loadDeferredCalls(): array
 	{
-		$store = $this->getDeferredStore();
+		$store = $this->getDeferredStore(false);
 		if ($store === null || !isset($store[static::SESSION_KEY])) {
 			return [];
 		}
@@ -605,7 +930,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	protected function storeDeferredCalls(array $calls): void
 	{
-		$store = $this->getDeferredStore();
+		$store = $this->getDeferredStore(true);
 		if ($store === null) {
 			Prado::log('No session is available; ' . count($calls) . ' deferred gtag call(s) dropped.', TLogger::NOTICE, static::class);
 			return;
@@ -615,13 +940,30 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Returns the store of the deferred calls: the application session. Override to use another store.
-	 * @return ?\ArrayAccess The store, or null when the application has no session.
+	 * Returns the store of the deferred calls: the application session, opened when it is not.
+	 * A read without a session cookie on the request returns null without opening one, so a
+	 * visitor gets no session for the sake of a lookup that cannot find anything. Override to use
+	 * another store.
+	 * @param bool $forWrite Whether calls are about to be stored, which opens a session in any case.
+	 * @return ?\ArrayAccess The store, or null when the application has no session or none holds deferred calls.
 	 */
-	protected function getDeferredStore(): ?\ArrayAccess
+	protected function getDeferredStore(bool $forWrite = false): ?\ArrayAccess
 	{
-		$session = $this->getApplication()->getSession();
-		return $session instanceof \ArrayAccess ? $session : null;
+		$app = $this->getApplication();
+		$session = $app->getSession();
+		if (!($session instanceof THttpSession)) {
+			return $session instanceof \ArrayAccess ? $session : null;
+		}
+		if (!$session->getIsStarted()) {
+			if (!$forWrite) {
+				$request = $app->getRequest();
+				if (!($request instanceof THttpRequest) || $request->getCookies()->findCookieByName($session->getSessionName()) === null) {
+					return null;
+				}
+			}
+			$session->open();
+		}
+		return $session;
 	}
 
 	/**
@@ -714,6 +1056,231 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	// =========================================================================
+	// Data API and Admin API
+	// =========================================================================
+
+	/**
+	 * Runs a Data API report on the {@see getPropertyId() PropertyId}.
+	 * @param string[] $metrics The metric names, such as `activeUsers`.
+	 * @param string[] $dimensions The dimension names, such as `pagePath`.
+	 * @param string $startDate The start date: `YYYY-MM-DD`, `NdaysAgo`, `yesterday` or `today`.
+	 * @param string $endDate The end date, in the same forms.
+	 * @param array<string, mixed> $extra Further request fields (`limit`, `orderBys`, `dimensionFilter`, …).
+	 * @throws TConfigurationException When the property id or the credentials are unset.
+	 * @throws GAnalyticsApiException When the API refuses the request.
+	 * @return GAnalyticsReport The report; its rows bind to a data control.
+	 */
+	public function runReport(array $metrics, array $dimensions = [], string $startDate = '28daysAgo', string $endDate = 'today', array $extra = []): GAnalyticsReport
+	{
+		return $this->getDataApi()->runReport(GAnalyticsDataApi::reportRequest($metrics, $dimensions, $startDate, $endDate, $extra));
+	}
+
+	/**
+	 * Runs a Data API realtime report on the {@see getPropertyId() PropertyId}.
+	 * @param ?string[] $metrics The metric names; null for the {@see getRealtimeMetrics() RealtimeMetrics}.
+	 * @param ?string[] $dimensions The dimension names; null for the {@see getRealtimeDimensions() RealtimeDimensions}.
+	 * @param array<string, mixed> $extra Further request fields (`limit`, `minuteRanges`, …).
+	 * @throws TConfigurationException When the property id or the credentials are unset.
+	 * @throws GAnalyticsApiException When the API refuses the request.
+	 * @return GAnalyticsReport The report.
+	 */
+	public function runRealtimeReport(?array $metrics = null, ?array $dimensions = null, array $extra = []): GAnalyticsReport
+	{
+		return $this->getDataApi()->runRealtimeReport(GAnalyticsDataApi::realtimeRequest($metrics ?? $this->getRealtimeMetrics(), $dimensions ?? $this->getRealtimeDimensions(), $extra));
+	}
+
+	/**
+	 * Polls the realtime report ({@see getRealtimeMetrics() RealtimeMetrics},
+	 * {@see getRealtimeDimensions() RealtimeDimensions}) and raises {@see onRealtimeReport} with
+	 * it. The Data API has no push channel, so a `TCronModule` job
+	 * (`task="belisoful/ganalytics->pollRealtime"`) calls this on a schedule and a handler of the
+	 * event publishes the figures through the application's channel, such as
+	 * `belisoful/prado-webhooks` or `belisoful/prado-websocket`.
+	 * @throws TConfigurationException When the property id or the credentials are unset.
+	 * @throws GAnalyticsApiException When the API refuses the request.
+	 * @return GAnalyticsReport The report.
+	 */
+	public function pollRealtime(): GAnalyticsReport
+	{
+		$report = $this->runRealtimeReport();
+		$this->onRealtimeReport(new TEventParameter($report));
+		return $report;
+	}
+
+	/**
+	 * Raised by {@see pollRealtime()} with the realtime report as the parameter's Parameter.
+	 * @param TEventParameter $param The event parameter, carrying the {@see GAnalyticsReport}.
+	 */
+	public function onRealtimeReport($param)
+	{
+		$this->raiseEvent('onRealtimeReport', $this, $param);
+	}
+
+	/**
+	 * Returns the Data API client, configured with the {@see getPropertyId() PropertyId} and the
+	 * {@see getCredentials() Credentials} on every call.
+	 * @return GAnalyticsDataApi The client.
+	 */
+	public function getDataApi(): GAnalyticsDataApi
+	{
+		$this->_dataApi ??= $this->createDataApi();
+		$this->_dataApi->setPropertyId($this->getPropertyId());
+		$this->_dataApi->setCredentials($this->getCredentials());
+		return $this->_dataApi;
+	}
+
+	/**
+	 * Creates the Data API client; the seam a subclass or test replaces the transport through.
+	 * @return GAnalyticsDataApi A new client.
+	 */
+	protected function createDataApi(): GAnalyticsDataApi
+	{
+		return new GAnalyticsDataApi();
+	}
+
+	/**
+	 * Returns the Admin API client, configured with the {@see getCredentials() Credentials} on every call.
+	 * @return GAnalyticsAdminApi The client.
+	 */
+	public function getAdminApi(): GAnalyticsAdminApi
+	{
+		$this->_adminApi ??= $this->createAdminApi();
+		$this->_adminApi->setCredentials($this->getCredentials());
+		return $this->_adminApi;
+	}
+
+	/**
+	 * Creates the Admin API client; the seam a subclass or test replaces the transport through.
+	 * @return GAnalyticsAdminApi A new client.
+	 */
+	protected function createAdminApi(): GAnalyticsAdminApi
+	{
+		return new GAnalyticsAdminApi();
+	}
+
+	/**
+	 * Returns the API credentials, resolving a module id to the module on first use.
+	 * @throws TConfigurationException When the id names no module, or a module that is not an {@see IGAnalyticsCredentials}.
+	 * @return ?IGAnalyticsCredentials The credentials, or null when none are set.
+	 */
+	public function getCredentials(): ?IGAnalyticsCredentials
+	{
+		if (is_string($this->_credentials)) {
+			$module = $this->getApplication()->getModule($this->_credentials);
+			if (!($module instanceof IGAnalyticsCredentials)) {
+				throw new TConfigurationException('ganalytics_module_invalid', $this->_credentials, IGAnalyticsCredentials::class);
+			}
+			$this->_credentials = $module;
+		}
+		return $this->_credentials;
+	}
+
+	/**
+	 * Sets the API credentials: an {@see IGAnalyticsCredentials}, the id of a module that is one,
+	 * or a configuration array with a `class` and properties (a `<credentials>` element).
+	 * @param mixed $value The credentials; empty for none.
+	 * @throws TConfigurationException When a configuration array has no class or one that is not an {@see IGAnalyticsCredentials}.
+	 */
+	public function setCredentials($value)
+	{
+		if ($value === null || $value === '' || $value instanceof IGAnalyticsCredentials) {
+			$this->_credentials = $value === '' ? null : $value;
+		} elseif (is_array($value)) {
+			$this->_credentials = $this->createConfigured($value, IGAnalyticsCredentials::class);
+		} else {
+			$this->_credentials = trim((string) TPropertyValue::ensureString($value));
+		}
+	}
+
+	/**
+	 * Creates a component from a configuration array (`class` plus properties) and checks its type
+	 * before instantiating it, so a misconfigured class never runs a constructor.
+	 * @param array<string, mixed> $properties The configuration, including `class`.
+	 * @param string $interface The interface the class must implement.
+	 * @throws TConfigurationException When the class is absent or does not implement the interface.
+	 * @return object The configured component.
+	 */
+	protected function createConfigured(array $properties, string $interface): object
+	{
+		$class = $properties['class'] ?? null;
+		unset($properties['class'], $properties['id']);
+		if (!is_string($class) || $class === '' || !is_a($class, $interface, true) || !is_a($class, TComponent::class, true)) {
+			throw new TConfigurationException('ganalytics_class_invalid', (string) $class, $interface);
+		}
+		$component = Prado::createComponent($class);
+		foreach ($properties as $name => $value) {
+			$component->setSubProperty($name, $value);
+		}
+		return $component;
+	}
+
+	/**
+	 * @return ?string The GA4 property id the Data API reads.
+	 */
+	public function getPropertyId(): ?string
+	{
+		return $this->_propertyId;
+	}
+
+	/**
+	 * @param mixed $value The GA4 property id (`123456789` or `properties/123456789`); empty for none.
+	 * @throws TInvalidDataValueException When the value is not a property id.
+	 */
+	public function setPropertyId($value)
+	{
+		$this->_propertyId = GAnalyticsDataApi::normalizePropertyId($value);
+	}
+
+	/**
+	 * @return string[] The metrics of {@see pollRealtime()}. Defaults to `activeUsers`.
+	 */
+	public function getRealtimeMetrics(): array
+	{
+		return $this->_realtimeMetrics;
+	}
+
+	/**
+	 * @param mixed $value The realtime metric names, as an array or a comma-separated string; empty restores `activeUsers`.
+	 */
+	public function setRealtimeMetrics($value)
+	{
+		$names = $this->ensureNames($value);
+		$this->_realtimeMetrics = count($names) > 0 ? $names : ['activeUsers'];
+	}
+
+	/**
+	 * @return string[] The dimensions of {@see pollRealtime()}. Defaults to none.
+	 */
+	public function getRealtimeDimensions(): array
+	{
+		return $this->_realtimeDimensions;
+	}
+
+	/**
+	 * @param mixed $value The realtime dimension names, as an array or a comma-separated string; empty for none.
+	 */
+	public function setRealtimeDimensions($value)
+	{
+		$this->_realtimeDimensions = $this->ensureNames($value);
+	}
+
+	/**
+	 * Converts a property value to a list of trimmed, unique, non-empty names.
+	 * @param mixed $value An array or a comma-separated string.
+	 * @return string[] The names.
+	 */
+	protected function ensureNames($value): array
+	{
+		$names = [];
+		foreach (TPropertyValue::ensureArray($value, TPropertyValue::ARRAY_SKIP_EMPTY) as $name) {
+			if (trim((string) $name) !== '') {
+				$names[] = trim((string) $name);
+			}
+		}
+		return array_values(array_unique($names));
+	}
+
+	// =========================================================================
 	// Script
 	// =========================================================================
 
@@ -734,10 +1301,11 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
-	 * Returns the inline Google tag script: the data layer bootstrap, the consent defaults when
-	 * any are set, `gtag('js')`, `gtag('config')` with the {@see getEffectiveConfigOptions()
-	 * effective options}, and a `gtag('config')` per additional Measurement ID. Every value is
-	 * JavaScript-encoded, so a Measurement ID or option value cannot break out of the script.
+	 * Returns the inline tag script: the data layer bootstrap and the `gtag` function, the
+	 * effective consent defaults when any, and then, with a Measurement ID, `gtag('js')` and a
+	 * `gtag('config')` per id with the {@see getEffectiveConfigOptions() effective options} on the
+	 * first, and, with a container id, the Tag Manager loader. Every value is JavaScript-encoded,
+	 * so an id or option value cannot break out of the script.
 	 * @param ?TPage $page The page the script is for, or null for a page-independent script.
 	 * @return string The script block, without `<script>` tags.
 	 */
@@ -748,20 +1316,120 @@ class GAnalyticsModule extends TPluginModule
 			"window.{$layer} = window.{$layer} || [];",
 			"function gtag(){{$layer}.push(arguments);}",
 		];
-		$consent = $this->getConsentDefaults();
+		$consent = $this->getEffectiveConsentDefaults();
 		if (count($consent) > 0) {
 			$lines[] = "gtag('consent', 'default', " . TJavaScript::encode($consent) . ');';
 		}
-		$lines[] = "gtag('js', new Date());";
-		$id = TJavaScript::quoteString((string) $this->getMeasurementId());
-		$options = $this->getEffectiveConfigOptions($page);
-		$lines[] = count($options) > 0
-			? "gtag('config', {$id}, " . TJavaScript::encode($options) . ');'
-			: "gtag('config', {$id});";
-		foreach ($this->getAdditionalMeasurementIds() as $additional) {
-			$lines[] = "gtag('config', " . TJavaScript::quoteString($additional) . ');';
+		if ($this->getUsesGtag()) {
+			$lines[] = "gtag('js', new Date());";
+			$id = TJavaScript::quoteString((string) $this->getMeasurementId());
+			$options = $this->getEffectiveConfigOptions($page);
+			$lines[] = count($options) > 0
+				? "gtag('config', {$id}, " . TJavaScript::encode($options) . ');'
+				: "gtag('config', {$id});";
+			foreach ($this->getAdditionalMeasurementIds() as $additional) {
+				$lines[] = "gtag('config', " . TJavaScript::quoteString($additional) . ');';
+			}
+		}
+		if ($this->getContainerId() !== null) {
+			$lines[] = $this->getContainerScript();
 		}
 		return implode("\n", $lines);
+	}
+
+	/**
+	 * Returns the Google Tag Manager loader: Google's snippet, which marks `gtm.start` on the
+	 * data layer and inserts the asynchronous container script from
+	 * {@see getContainerUrl() ContainerUrl} with the container id and the data layer name.
+	 * @return string One JavaScript statement.
+	 */
+	public function getContainerScript(): string
+	{
+		return "(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});"
+			. "var f=d.getElementsByTagName(s)[0],j=d.createElement(s);j.async=true;"
+			. 'j.src=' . TJavaScript::quoteString($this->getContainerUrl()) . "+'?id='+encodeURIComponent(i)+(l!='dataLayer'?'&l='+encodeURIComponent(l):'');"
+			. 'f.parentNode.insertBefore(j,f);})(window,document,\'script\','
+			. TJavaScript::quoteString($this->getDataLayerName()) . ',' . TJavaScript::quoteString((string) $this->getContainerId()) . ');';
+	}
+
+	/**
+	 * Returns the container's `<noscript>` frame, Google's fallback for a browser without
+	 * JavaScript: an invisible iframe of `ns.html` beside the {@see getContainerUrl() ContainerUrl}.
+	 * @return string The HTML.
+	 */
+	public function getContainerNoScriptHtml(): string
+	{
+		$url = dirname($this->getContainerUrl()) . '/ns.html?id=' . rawurlencode((string) $this->getContainerId());
+		if ($this->getDataLayerName() !== static::DEFAULT_DATA_LAYER_NAME) {
+			$url .= '&l=' . rawurlencode($this->getDataLayerName());
+		}
+		return '<noscript><iframe src="' . htmlspecialchars($url, ENT_QUOTES) . '" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>';
+	}
+
+	/**
+	 * Returns the `gtag('consent', 'default', …)` parameters: the
+	 * {@see getConsentDefaults() ConsentDefaults}, overridden by the visitor's state from the
+	 * {@see getConsentProvider() ConsentProvider} when one is set.
+	 * @return array<string, mixed> The consent parameters.
+	 */
+	public function getEffectiveConsentDefaults(): array
+	{
+		$defaults = $this->getConsentDefaults();
+		$provider = $this->getConsentProvider();
+		if ($provider !== null) {
+			$defaults = array_merge($defaults, $provider->getConsentState());
+		}
+		return $defaults;
+	}
+
+	/**
+	 * Returns the consent provider, resolving a module id to the module on first use.
+	 * @throws TConfigurationException When the id names no module, or a module that is not an {@see IGAnalyticsConsentProvider}.
+	 * @return ?IGAnalyticsConsentProvider The provider, or null when none is set.
+	 */
+	public function getConsentProvider(): ?IGAnalyticsConsentProvider
+	{
+		if (is_string($this->_consentProvider)) {
+			$module = $this->getApplication()->getModule($this->_consentProvider);
+			if (!($module instanceof IGAnalyticsConsentProvider)) {
+				throw new TConfigurationException('ganalytics_module_invalid', $this->_consentProvider, IGAnalyticsConsentProvider::class);
+			}
+			$this->_consentProvider = $module;
+		}
+		return $this->_consentProvider;
+	}
+
+	/**
+	 * Sets the consent provider: an {@see IGAnalyticsConsentProvider}, the id of a module that is
+	 * one, or a configuration array with a `class` and properties (a `<consent>` element).
+	 * @param mixed $value The provider; empty for none.
+	 * @throws TConfigurationException When a configuration array has no class or one that is not an {@see IGAnalyticsConsentProvider}.
+	 */
+	public function setConsentProvider($value)
+	{
+		if ($value === null || $value === '' || $value instanceof IGAnalyticsConsentProvider) {
+			$this->_consentProvider = $value === '' ? null : $value;
+		} elseif (is_array($value)) {
+			$this->_consentProvider = $this->createConfigured($value, IGAnalyticsConsentProvider::class);
+		} else {
+			$this->_consentProvider = trim((string) TPropertyValue::ensureString($value));
+		}
+	}
+
+	/**
+	 * @return bool Whether a Measurement ID resolves, so the page carries gtag.js and events are `gtag('event')` calls.
+	 */
+	public function getUsesGtag(): bool
+	{
+		return $this->getMeasurementId() !== null;
+	}
+
+	/**
+	 * @return bool Whether a Measurement ID or a container id resolves, so a page gets a tag.
+	 */
+	public function getHasTag(): bool
+	{
+		return $this->getUsesGtag() || $this->getContainerId() !== null;
 	}
 
 	/**
@@ -1205,5 +1873,170 @@ class GAnalyticsModule extends TPluginModule
 	public function setAmendCsp($value)
 	{
 		$this->_amendCsp = TPropertyValue::ensureBoolean($value);
+	}
+
+	/**
+	 * @return ?string The Google Tag Manager container id, such as `GTM-XXXXXXX`.
+	 */
+	public function getContainerId(): ?string
+	{
+		return $this->_containerId;
+	}
+
+	/**
+	 * Sets the Google Tag Manager container id. With one, pages get the container loader and its
+	 * `<noscript>` frame; without a Measurement ID the container alone carries the tags.
+	 * @param mixed $value The container id; empty for none.
+	 * @throws TInvalidDataValueException When the value is not a `GTM-` id.
+	 */
+	public function setContainerId($value)
+	{
+		$value = TPropertyValue::ensureNullIfEmpty($value);
+		if ($value === null) {
+			$this->_containerId = null;
+			return;
+		}
+		$id = trim((string) TPropertyValue::ensureString($value));
+		if (!preg_match(static::CONTAINER_ID_PATTERN, $id)) {
+			throw new TInvalidDataValueException('ganalytics_containerid_invalid', $id);
+		}
+		$this->_containerId = $id;
+	}
+
+	/**
+	 * @return string The Google Tag Manager loader URL, without the `id` parameter. Defaults to {@see DEFAULT_CONTAINER_URL}.
+	 */
+	public function getContainerUrl(): string
+	{
+		return $this->_containerUrl;
+	}
+
+	/**
+	 * Sets the Tag Manager loader URL, for a server-side tagging host such as
+	 * `https://metrics.example.com/gtm.js`; `ns.html` is expected beside it. An empty value
+	 * restores {@see DEFAULT_CONTAINER_URL}.
+	 * @param mixed $value An absolute http or https URL without a query.
+	 * @throws TInvalidDataValueException When the value is not an absolute http or https URL without a query.
+	 */
+	public function setContainerUrl($value)
+	{
+		$value = TPropertyValue::ensureNullIfEmpty($value);
+		if ($value === null) {
+			$this->_containerUrl = static::DEFAULT_CONTAINER_URL;
+			return;
+		}
+		$url = trim((string) TPropertyValue::ensureString($value));
+		$scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
+		if (!in_array($scheme, ['http', 'https'], true) || filter_var($url, FILTER_VALIDATE_URL) === false || str_contains($url, '?') || str_contains($url, '#')) {
+			throw new TInvalidDataValueException('ganalytics_tagurl_invalid', $url);
+		}
+		$this->_containerUrl = $url;
+	}
+
+	/**
+	 * @return bool Whether a container's `<noscript>` frame is inserted at the top of the form. Defaults to true.
+	 */
+	public function getContainerNoScript(): bool
+	{
+		return $this->_containerNoScript;
+	}
+
+	/**
+	 * @param mixed $value Whether a container's `<noscript>` frame is inserted at the top of the form.
+	 */
+	public function setContainerNoScript($value)
+	{
+		$this->_containerNoScript = TPropertyValue::ensureBoolean($value);
+	}
+
+	/**
+	 * @return bool Whether {@see TApplication::onError} sends an `exception` event over the Measurement Protocol. Defaults to false.
+	 */
+	public function getTrackExceptions(): bool
+	{
+		return $this->_trackExceptions;
+	}
+
+	/**
+	 * @param mixed $value Whether uncaught exceptions are reported as `exception` events; needs the {@see setApiSecret() ApiSecret}.
+	 */
+	public function setTrackExceptions($value)
+	{
+		$this->_trackExceptions = TPropertyValue::ensureBoolean($value);
+	}
+
+	/**
+	 * @return bool Whether {@see TAuthManager} logins, failed logins and logouts queue events. Defaults to false.
+	 */
+	public function getTrackLogins(): bool
+	{
+		return $this->_trackLogins;
+	}
+
+	/**
+	 * @param mixed $value Whether logins (`login`, deferred), failed logins (`login_failed`) and logouts (`logout`, deferred) queue events.
+	 */
+	public function setTrackLogins($value)
+	{
+		$this->_trackLogins = TPropertyValue::ensureBoolean($value);
+	}
+
+	/**
+	 * @return bool Whether a postback whose validators failed queues a `form_error` event. Defaults to false.
+	 */
+	public function getTrackValidationErrors(): bool
+	{
+		return $this->_trackValidationErrors;
+	}
+
+	/**
+	 * @param mixed $value Whether a postback whose validators failed queues a `form_error` event; see {@see trackValidationErrors()}.
+	 */
+	public function setTrackValidationErrors($value)
+	{
+		$this->_trackValidationErrors = TPropertyValue::ensureBoolean($value);
+	}
+
+	/**
+	 * @return string The `method` parameter of the login events. Defaults to {@see DEFAULT_LOGIN_METHOD}.
+	 */
+	public function getLoginMethod(): string
+	{
+		return $this->_loginMethod;
+	}
+
+	/**
+	 * @param mixed $value The `method` parameter of the `login`, `login_failed` and `logout` events, such as `form` or `sso`; empty restores the default.
+	 */
+	public function setLoginMethod($value)
+	{
+		$value = TPropertyValue::ensureNullIfEmpty($value);
+		$this->_loginMethod = ($value === null) ? static::DEFAULT_LOGIN_METHOD : mb_substr(trim((string) TPropertyValue::ensureString($value)), 0, static::PARAM_MAX_LENGTH);
+	}
+
+	/**
+	 * @return string The shell action class registered with a {@see TShellApplication}. Defaults to {@see DEFAULT_SHELL_CLASS}.
+	 */
+	public function getShellClass(): string
+	{
+		return $this->_shellClass;
+	}
+
+	/**
+	 * @param mixed $value The shell action class, a {@see TShellAction}; empty restores the default.
+	 * @throws TConfigurationException When the class is not a {@see TShellAction}.
+	 */
+	public function setShellClass($value)
+	{
+		$value = TPropertyValue::ensureNullIfEmpty($value);
+		if ($value === null) {
+			$this->_shellClass = static::DEFAULT_SHELL_CLASS;
+			return;
+		}
+		$class = trim((string) TPropertyValue::ensureString($value));
+		if (!is_a($class, TShellAction::class, true)) {
+			throw new TConfigurationException('ganalytics_class_invalid', $class, TShellAction::class);
+		}
+		$this->_shellClass = $class;
 	}
 }

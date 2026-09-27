@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<com:THead Title="GAnalytics e2e: Login" />
+<body>
+<com:TForm>
+	<h1>Login</h1>
+	<com:TButton ID="login" Text="Log in" OnClick="logIn" />
+</com:TForm>
+</body>
+</html>

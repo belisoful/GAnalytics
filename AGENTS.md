@@ -6,6 +6,8 @@
 - **All Unit Tests**: `vendor/bin/phpunit --testsuite unit` (or `composer unittest`) - runs all unit tests
 - **Test Filter**: `vendor/bin/phpunit --testsuite unit --filter <test function, class, or directory>`
 - **Coverage**: `composer coverage` (text) / `composer coverage-html` (HTML in `build/coverage`); phpunit.xml declares `src/` as the coverage source and the scripts set `XDEBUG_MODE`. Narrow a run with `--filter` and `--coverage-filter`.
+- **Live tests**: `composer livetest` (`vendor/bin/phpunit --testsuite live`) talks to a real GA4 property; every test skips without `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `GA4_PROPERTY_ID` and `GA4_SERVICE_ACCOUNT_JSON`. CI supplies them as repository secrets on pushes.
+- **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/` and `app-gtm/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
 
 ### Linting and Code Analysis
 - **PHPStan Analysis**: `vendor/bin/phpstan analyse --memory-limit=1G` (or `composer stan`); level 3, `phpVersion` range 8.1 – 8.5
@@ -78,8 +80,9 @@ Docblocks inform and describe; it is not persuasive writing.
 - Throw appropriate PRADO exceptions (`TInvalidDataValueException` for a refused property value, `TConfigurationException` for a configuration that cannot work, `TInvalidOperationException` for a call out of sequence)
 - Return false or null for methods that are designed to fail gracefully (`registerPageScripts()` returns false when the page runs without the tag; `getMeasurementId()` returns null when none resolves; `sendEvent()` returns false and logs when Google refuses)
 - All methods should handle edge cases and validate input parameters
-- Extension Exceptions use error codes (keys) defined in `config/errorMessages.txt`; the message text is purely for user information display only. Every code thrown must exist in that file, and the file should carry no unused codes.
-- Conditions that are not errors (no Measurement ID configured) are logged through `Prado::log()` with `\Prado\Util\Log\TLogger` levels, under the module's class as category.
+- Extension Exceptions use error codes (keys) defined in `config/errorMessages.txt`; the message text is purely for user information display only. Every code thrown must exist in that file, and the file should carry no unused codes. A Google API refusal is a `GAnalyticsApiException` (`ganalytics_api_error`) carrying the status and Google's message.
+- Conditions that are not errors (no Measurement ID configured) are logged through `Prado::log()` with `\Prado\Util\Log\TLogger` levels, under the module's class as category. An event handler on a framework event (`errorHandler()`) never throws; it logs.
+- Every Google request goes through `GAnalyticsHttpTransportTrait::transport()` (a `file_get_contents()` over an `http` stream context); tests override it with `RecordingTransportTrait`. No other HTTP client is used.
 
 ### Imports and Includes
 - Use PSR-4 autoloading - no manual includes required
@@ -104,12 +107,19 @@ Docblocks inform and describe; it is not persuasive writing.
 - Follow the TApplication Lifecycle: onConfiguration → onInitComplete (at end of TApplication::initApplication) → onBeginRequest → onLoadState → onLoadStateComplete → onAuthentication → onAuthenticationComplete → onAuthorization → onAuthorizationComplete → onPreRunService → runService → onSaveState → onSaveStateComplete → onPreFlushOutput → flushOutput → onEndRequest or onError (both at end of TApplication::run)
 - Follow the TPage Lifecycle (via TPageService::runPage): onPreInit → initRecursive → onInitComplete → loadPageState (POST/Callback) → processPostData (POST/Callback) → onPreLoad → loadRecursive → processPostData (POST/Callback) → raiseChangedEvents (POST/Callback) → raisePostBackEvent (POST-only) → processCallbackEvent (Callback-only) → onLoadComplete → preRenderRecursive  onPreRenderComplete → savePageState → onSaveStateComplete → renderControl (GET/POST) → renderCallbackResponse (Callback-only) → unloadRecursive
 - XML and PHP is supported for application configuration
-- TPageService::onPreRunPage gives PRADO Modules event access to the TPage Lifecycle before it runs; this module registers the tag there. `TPage::getIsCallback()` is not meaningful before `TPage::run()`, so callback handling and call delivery happen at `onPreRenderComplete`: a full page gets an end script, a callback gets `TCallbackClientScript::callClientFunction('gtag', …)` (the client resolves the global `gtag` function by name).
+- TPageService::onPreRunPage gives PRADO Modules event access to the TPage Lifecycle before it runs; this module arms the tag there and does the work at `TPage::onPreRenderComplete`, when `TPage::getHead()` and `getIsCallback()` are known: the tag is registered in the head (with a `THead`) or the form (without one; `TPage::onPreRenderComplete` throws `page_head_required` when head scripts are registered on a page without a `THead`), a full page gets an end script with the calls, a callback gets `TCallbackClientScript::callClientFunction('gtag', …)` (the client resolves the global `gtag` function by name) or `evaluateScript()` for a container's data layer push.
+- Deferred calls live in the application session; `THttpSession::AutoStart` defaults to false, so the module opens the session for a write and, for a read, only when the request carries the session cookie (`THttpSession::getSessionName()`).
+- `THttpHeaderCsp::init()` reads `TSecurityManager::getCSPNonce()` while the modules initialize, before `onLoadState` loads the application state that holds a generated validation key; an application with a CSP nonce and no configured `ValidationKey` generates a new key per request and every postback fails with "Page state is corrupted". The end-to-end application sets a fixed `ValidationKey`; the README tells users to.
+- An application in this repository configures the module by `class`: the package is the root project and Composer's `installed.json` does not list it, so the `belisoful/ganalytics` module id resolves only in an application that installed the package.
 - `TPage::getCallbackClient()` returns the adapter's client on a callback and a throwaway object otherwise; only the callback path uses it.
 - Class behaviors (`TComponent::attachClassBehavior(name, behavior, TPage::class)`) inject the owner as the first method argument (`IClassBehavior`); `GAnalyticsPageBehavior` methods take `$page` first. A name can be attached once per class; tests detach it in `tearDown()`.
 - `THttpHeadersManager` modules carry `THttpHeaderCsp` headers whose directives are read with `getPolicy()` and replaced with `setPolicy()` (`addPolicy()` is an alias, not an append); `TJavaScript` emits the CSP nonce on every script tag it renders.
 - The `user_id` derivation uses `TSecurityManager::getValidationKey()` (HMAC-SHA256 of the `IUser` name); `computeHMAC()` is protected.
-- The Measurement Protocol client reads `TApplicationClockAwareTrait::getClock()` for `timestamp_micros` and generated client ids; tests set a `TMockClock`.
+- The Measurement Protocol client and the service account credentials read `TApplicationClockAwareTrait::getClock()` for `timestamp_micros`, generated client ids and the JWT `iat`/`exp`; tests set a `TMockClock`.
+- `TAuthManager` raises `onLogin($user)`, `onLoginFailed($username)` and `onLogout($user)`; the module finds every auth manager with `getModulesByType()` and loads lazy ones.
+- `TApplication::onError($param)` carries the throwable; the error handler runs after it, so the page will not render and the `exception` event goes over the Measurement Protocol.
+- `TShellApplication::addShellActionClass(['class' => …, 'Module' => $this])` creates the action with `Prado::createComponent()` and sets the `Module` property; the module registers it at hook time, before `processArguments()` installs the built-in actions.
+- `TCronModule` runs `task="belisoful/ganalytics->pollRealtime"` (`TCronMethodTask`); the Data API has no push channel.
 - Modules configured in the application initialize before `onInitComplete`; a lazily loaded module initializes later, when `TApplication::hasStateFlag(TApplication::STATE_INITIALIZED)` is already true. `init()` handles both.
 - Framework core updates 'framework/classes.php' with new classes; this does NOT apply to this extension (see the PSR-4 / class-map note below).
 - Web Pages are PHP classes with a ".page" TTemplate file with the same base name
@@ -125,7 +135,7 @@ Docblocks inform and describe; it is not persuasive writing.
 - Error codes (keys) and their messages live in `config/errorMessages.txt`, registered by Composer from `composer.json` `extra.prado.error-messages`; the framework's `messages.txt` is not used. `TPluginModule` also looks for an `errorMessages.txt` next to the module class (`src/`); this extension keeps the file under `config/` and relies on Composer.
 
 ## Testing Guidelines
-- The testing platform is "phpunit" (unit)
+- The testing platforms are "phpunit" (unit, live) and "playwright" (browser end-to-end)
 - Unit test classes use the `belisoful\GAnalytics\Test\Unit\` namespace, autoloaded by Composer (`autoload-dev` PSR-4 → `tests/unit/`).
   - The namespace follows the directory: `tests/unit/GAnalyticsModuleTest.php` → `belisoful\GAnalytics\Test\Unit\GAnalyticsModuleTest`.
   - A class used by another file lives in its own file named after the class. Fixtures used only by one test file stay in that file.
@@ -133,7 +143,10 @@ Docblocks inform and describe; it is not persuasive writing.
   - Helper classes in their own file must not end in `Test`; phpunit collects `*Test.php` files as tests.
   - Global classes are written with a leading backslash inside the test namespace (`new \stdClass()`).
 - `tests/test_tools/phpunit_bootstrap.php` registers the error messages, defines `PRADO_TEST_RUN` (so a test may construct another `TApplication`), and constructs a `TApplication` on `tests/unit/app` without running it. A test that needs a page sets a `TPageService` as the application's service (`TPage::getClientScript()` asks the service for its manager class) and restores the previous service in `tearDown()`.
-- Shared fixtures live in their own files: `ProbeGAnalyticsModule` (an `\ArrayObject` deferred store, a `RecordingMeasurementProtocol`), `RecordingMeasurementProtocol` (records `post()` calls, answers a canned status) and `FakeUser` (an `IUser`). Network, session and randomness never reach a test.
+- Shared fixtures live in their own files: `ProbeGAnalyticsModule` (an `\ArrayObject` deferred store; recording Measurement Protocol, Data API and Admin API clients), `RecordingTransportTrait` (records `transport()` calls, answers from a queue) with `RecordingDataApi`, `RecordingAdminApi`, `RecordingServiceAccountCredentials`, `RecordingMeasurementProtocol` (records `post()`), `FakeUser` (an `IUser`), `FakeSession` (a `THttpSession` over an array), `FakeCredentialsModule`, `FakeConsentModule`, `RecordingResponse` (records cookies). Network, PHP sessions and randomness never reach a unit test; a service account test generates its own RSA key with `openssl_pkey_new()`.
+- The phpunit bootstrap creates the default response module and closes its output buffer, so no test is flagged risky for a buffer PRADO opened.
+- Live tests (`tests/live`, namespace `belisoful\GAnalytics\Test\Live`, `LiveTestCase`) read the `GA4_*` environment and skip without it; they are the only tests that reach Google.
+- Playwright specs (`tests/playwright/*.spec.js`) use `helpers.js`: `stubGoogle(page)` answers Google's hosts locally, `dataLayer(page)` and `gtagCalls(page)` read the page's data layer. A spec never depends on Google being reachable.
 - All new code must include unit tests
 - Unit test functions must comprehensively assert both typical and edge cases
 - Maximal coverage of code execution paths of a class is required
@@ -150,7 +163,8 @@ Docblocks inform and describe; it is not persuasive writing.
 - Composer for dependency management
 - Required developer dependencies for code checking: phpunit/phpunit, phpstan/phpstan, friendsofphp/php-cs-fixer
 - Presume that project dependencies are installed
-- CI installs the sibling `pradosoft/prado` (`master`) checkout as a Composer path repository, so the extension is always built against the framework's development HEAD
+- `ext-openssl` for the service account JWT; Node (see `.nvmrc`) for Playwright
+- CI installs the sibling `pradosoft/prado` (`master`) checkout as a Composer path repository, so the extension is always built against the framework's development HEAD; the `live` job needs the `GA4_*` repository secrets and skips its tests without them
 
 ## Directory Structure
 ```
@@ -162,13 +176,25 @@ Docblocks inform and describe; it is not persuasive writing.
 │   ├── classMap.json           # Prado3 short class name → fully qualified name (composer extra.prado.class-map)
 │   └── errorMessages.txt       # Error codes and messages (composer extra.prado.error-messages)
 ├── src/                        # PSR-4 root for belisoful\GAnalytics
-│   ├── GAnalyticsModule.php    # The module: tag, calls, user id, CSP, Measurement Protocol front
+│   ├── GAnalyticsModule.php                # The module: tag, calls, PRADO hooks, consent, user id, CSP, MP, Data API, realtime, shell
 │   ├── GAnalyticsPageBehavior.php          # TClassBehavior on TPage: trackEvent() and friends on pages
-│   └── GAnalyticsMeasurementProtocol.php   # Server-side Measurement Protocol client
+│   ├── GAnalyticsMeasurementProtocol.php   # Server-side Measurement Protocol client
+│   ├── GAnalyticsApiClient.php             # Base of the JSON API clients (request, requestAll)
+│   ├── GAnalyticsDataApi.php               # Data API v1beta; GAnalyticsReport.php is its report model
+│   ├── GAnalyticsAdminApi.php              # Admin API v1beta
+│   ├── GAnalyticsApiException.php          # A Google API refusal
+│   ├── IGAnalyticsCredentials.php          # Token seam; GAnalyticsServiceAccountCredentials.php, GAnalyticsAccessTokenCredentials.php
+│   ├── IGAnalyticsConsentProvider.php      # Consent seam; IGAnalyticsConsentStore.php, GAnalyticsCookieConsentProvider.php
+│   ├── GAnalyticsHttpTransportTrait.php    # The one HTTP transport seam
+│   └── GAnalyticsShellAction.php           # prado-cli ganalytics/*
 ├── tests/
+│   ├── live/                   # phpunit tests against a real property; namespace belisoful\GAnalytics\Test\Live; skip without GA4_* variables
+│   ├── playwright/             # Browser end-to-end specs, helpers, and the app/ and app-gtm/ PRADO applications they drive
 │   ├── test_tools/             # phpunit and phpstan bootstraps
 │   └── unit/                   # phpunit tests and fixtures; namespace belisoful\GAnalytics\Test\Unit (autoload-dev PSR-4)
 │       └── app/                # The minimal application the tests construct
+├── playwright.config.js        # Playwright: the PHP server, the browsers, the report
+├── package.json                # @playwright/test
 ├── AGENTS.md                   # This file
 ├── CHANGELOG.md                # Release notes (Keep a Changelog)
 ├── CLAUDE.md                   # Short memory file for the directory

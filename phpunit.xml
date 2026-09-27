@@ -4,6 +4,10 @@
 	<testsuite name="unit">
 	  <directory suffix="Test.php">./tests/unit</directory>
 	</testsuite>
+	<!-- Talks to Google with a real property; each test skips without the GA4_* environment variables. -->
+	<testsuite name="live">
+	  <directory suffix="Test.php">./tests/live</directory>
+	</testsuite>
   </testsuites>
   <logging>
 	<testdoxHtml outputFile="./build/tests/index.html"/>

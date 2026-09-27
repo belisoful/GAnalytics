@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<com:THead Title="GAnalytics e2e: Home" />
+<body>
+<com:TForm>
+	<h1>Home</h1>
+	<com:TActiveButton ID="track" Text="Track" OnCallback="trackClick" />
+	<com:TActiveButton ID="consent" Text="Grant consent" OnCallback="grantConsent" />
+	<com:TActiveLabel ID="status" Text="idle" />
+	<p><com:THyperLink NavigateUrl="<%= $this->Service->constructUrl('Login') %>" Text="Login" /></p>
+</com:TForm>
+</body>
+</html>

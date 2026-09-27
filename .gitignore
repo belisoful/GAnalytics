@@ -31,3 +31,21 @@ nbproject
 .project
 .settings
 atlassian-ide-plugin.xml
+
+# Node / Playwright (end-to-end tests)
+/node_modules
+/test-results/
+/playwright-report/
+package-lock.json
+bun.lock
+bun.lockb
+
+# end-to-end applications: published assets and runtime
+tests/playwright/app/assets/*
+!tests/playwright/app/assets/.gitkeep
+tests/playwright/app/protected/runtime/*
+!tests/playwright/app/protected/runtime/.gitkeep
+tests/playwright/app-gtm/assets/*
+!tests/playwright/app-gtm/assets/.gitkeep
+tests/playwright/app-gtm/protected/runtime/*
+!tests/playwright/app-gtm/protected/runtime/.gitkeep

@@ -1,0 +1,11 @@
+<!DOCTYPE html>
+<html>
+<com:THead Title="GAnalytics e2e: Tag Manager" />
+<body>
+<com:TForm>
+	<h1>Tag Manager</h1>
+	<com:TActiveButton ID="track" Text="Track" OnCallback="trackClick" />
+	<com:TActiveLabel ID="status" Text="idle" />
+</com:TForm>
+</body>
+</html>

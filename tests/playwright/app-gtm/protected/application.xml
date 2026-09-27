@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<application id="ganalytics-e2e-gtm" Mode="Debug">
+	<modules>
+		<module id="ganalytics" class="belisoful\GAnalytics\GAnalyticsModule" ContainerId="GTM-E2ETEST" />
+	</modules>
+	<services>
+		<service id="page" class="TPageService" DefaultPage="Home" />
+	</services>
+</application>

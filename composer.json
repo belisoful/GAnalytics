@@ -2,7 +2,17 @@
 	"name": "belisoful/ganalytics",
 	"type": "prado4-extension",
 	"description": "Google Analytics 4 (gtag.js) for the PRADO PHP framework: a module that injects the Google tag into every page.",
-	"keywords": [ "prado", "google", "analytics", "ga4", "gtag", "measurement", "metrics", "traffic", "extension"],
+	"keywords": [
+		"prado",
+		"google",
+		"analytics",
+		"ga4",
+		"gtag",
+		"measurement",
+		"metrics",
+		"traffic",
+		"extension"
+	],
 	"homepage": "https://github.com/belisoful/GAnalytics",
 	"license": "BSD-3-Clause",
 	"authors": [
@@ -20,7 +30,8 @@
 	},
 	"autoload-dev": {
 		"psr-4": {
-			"belisoful\\GAnalytics\\Test\\Unit\\": "tests/unit/"
+			"belisoful\\GAnalytics\\Test\\Unit\\": "tests/unit/",
+			"belisoful\\GAnalytics\\Test\\Live\\": "tests/live/"
 		}
 	},
 	"repositories": [
@@ -33,6 +44,11 @@
 	"require": {
 		"php": ">=8.1.0",
 		"pradosoft/prado": "^4.4@dev"
+	},
+	"suggest": {
+		"ext-openssl": "Signing the service account JWT for the Data API and Admin API (GAnalyticsServiceAccountCredentials).",
+		"belisoful/prado-webhooks": "Pushing realtime figures from pollRealtime() to other systems; the Data API itself is pull-only.",
+		"belisoful/prado-websocket": "Pushing realtime figures from pollRealtime() to browsers."
 	},
 	"require-dev": {
 		"phpunit/phpunit": "^10",
@@ -51,6 +67,7 @@
 		],
 		"stan": "vendor/bin/phpstan analyse --memory-limit=1G",
 		"unittest": "vendor/bin/phpunit --testsuite unit",
+		"livetest": "vendor/bin/phpunit --testsuite live",
 		"coverage": [
 			"@putenv XDEBUG_MODE=coverage",
 			"vendor/bin/phpunit --testsuite unit --coverage-text"

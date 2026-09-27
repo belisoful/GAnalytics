@@ -15,4 +15,12 @@ define('PRADO_TEST_RUN', true);
 
 \Prado\Exceptions\TException::addMessageFile(__DIR__ . '/../../config/errorMessages.txt');
 
-new \Prado\TApplication(__DIR__ . '/../unit/app', false);
+$application = new \Prado\TApplication(__DIR__ . '/../unit/app', false);
+
+// The default response module starts an output buffer when it initializes; create it here and
+// close that buffer, so phpunit's own output is not captured and no test is flagged for it.
+$level = ob_get_level();
+$application->getResponse();
+while (ob_get_level() > $level) {
+	ob_end_flush();
+}

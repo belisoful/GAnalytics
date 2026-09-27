@@ -2,12 +2,18 @@
 
 namespace belisoful\GAnalytics\Test\Unit;
 
+use belisoful\GAnalytics\GAnalyticsAccessTokenCredentials;
 use belisoful\GAnalytics\GAnalyticsModule;
 use belisoful\GAnalytics\GAnalyticsPageBehavior;
+use belisoful\GAnalytics\GAnalyticsReport;
+use belisoful\GAnalytics\GAnalyticsShellAction;
 use PHPUnit\Framework\TestCase;
 use Prado\Exceptions\TConfigurationException;
+use Prado\Exceptions\THttpException;
 use Prado\Exceptions\TInvalidDataValueException;
 use Prado\Prado;
+use Prado\Security\TAuthManager;
+use Prado\Shell\TShellApplication;
 use Prado\TApplication;
 use Prado\TApplicationMode;
 use Prado\TComponent;
@@ -20,8 +26,12 @@ use Prado\Web\HttpHeaders\THttpHeadersManager;
 use Prado\Web\Services\TPageService;
 use Prado\Web\THttpCookie;
 use Prado\Web\UI\ActiveControls\TCallbackClientScript;
+use Prado\Web\UI\TForm;
 use Prado\Web\UI\TPage;
 use Prado\Web\UI\WebControls\THead;
+use Prado\Web\UI\WebControls\TLiteral;
+use Prado\Web\UI\WebControls\TRequiredFieldValidator;
+use Prado\Xml\TXmlElement;
 
 /** An application whose initialized state a test sets, to exercise the lazily loaded module path. */
 class InitializedTestApplication extends TApplication
@@ -70,6 +80,15 @@ class OtherService extends TService
 {
 }
 
+/** A page that reports a postback, for the validation tracking. */
+class PostBackPage extends TPage
+{
+	public function getIsPostBack()
+	{
+		return true;
+	}
+}
+
 class GAnalyticsModuleTest extends TestCase
 {
 	private const ID = 'G-TEST1234AB';
@@ -90,6 +109,9 @@ class GAnalyticsModuleTest extends TestCase
 		$this->_app->getParameters()->remove(GAnalyticsModule::MEASUREMENT_ID_PARAMETER);
 	}
 
+	/** @var ProbeGAnalyticsModule[] The probes of the test, whose application hooks are detached afterwards. */
+	private array $_probes = [];
+
 	protected function tearDown(): void
 	{
 		$this->_app->getParameters()->remove(GAnalyticsModule::MEASUREMENT_ID_PARAMETER);
@@ -97,6 +119,9 @@ class GAnalyticsModuleTest extends TestCase
 		$this->_app->setService($this->_previousService);
 		$this->_app->setMode($this->_previousMode);
 		$this->_app->setUser(new FakeUser());
+		foreach ($this->_probes as $probe) {
+			$this->_app->detachEventHandler('onError', [$probe, 'errorHandler']);
+		}
 		TComponent::detachClassBehavior(GAnalyticsModule::PAGE_BEHAVIOR_NAME, TPage::class);
 		if (Prado::getApplication() !== $this->_app) {
 			Prado::setApplication($this->_app);
@@ -111,7 +136,17 @@ class GAnalyticsModuleTest extends TestCase
 		if ($id !== null) {
 			$module->setMeasurementId($id);
 		}
+		$this->_probes[] = $module;
 		return $module;
+	}
+
+	/** Registers a module under a unique id, since the application never forgets one. */
+	private function registerModule(\Prado\IModule $module, string $prefix): string
+	{
+		$id = $prefix . '-' . uniqid();
+		$module->setID($id);
+		$this->_app->setModule($id, $module);
+		return $id;
 	}
 
 	private function module(?string $id = self::ID): GAnalyticsModule
@@ -155,6 +190,516 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertNull($module->getApiSecret());
 		self::assertNull($module->getPageBehavior());
 		self::assertSame([], $module->getQueuedCalls());
+		self::assertNull($module->getContainerId());
+		self::assertSame('https://www.googletagmanager.com/gtm.js', $module->getContainerUrl());
+		self::assertTrue($module->getContainerNoScript());
+		self::assertFalse($module->getUsesGtag());
+		self::assertFalse($module->getHasTag());
+		self::assertFalse($module->getTrackExceptions());
+		self::assertFalse($module->getTrackLogins());
+		self::assertFalse($module->getTrackValidationErrors());
+		self::assertSame('form', $module->getLoginMethod());
+		self::assertNull($module->getConsentProvider());
+		self::assertNull($module->getPropertyId());
+		self::assertNull($module->getCredentials());
+		self::assertSame(['activeUsers'], $module->getRealtimeMetrics());
+		self::assertSame([], $module->getRealtimeDimensions());
+		self::assertSame(GAnalyticsShellAction::class, $module->getShellClass());
+	}
+
+	// =========================================================================
+	// Google Tag Manager
+	// =========================================================================
+
+	public function testContainerIdAndUrlValidation()
+	{
+		$module = new GAnalyticsModule();
+		$module->setContainerId(' GTM-ABC1234 ');
+		self::assertSame('GTM-ABC1234', $module->getContainerId());
+		self::assertTrue($module->getHasTag());
+		self::assertFalse($module->getUsesGtag());
+		$module->setContainerId('');
+		self::assertNull($module->getContainerId());
+		$module->setContainerUrl('https://metrics.example.com/gtm.js');
+		self::assertSame('https://metrics.example.com/gtm.js', $module->getContainerUrl());
+		$module->setContainerUrl('');
+		self::assertSame(GAnalyticsModule::DEFAULT_CONTAINER_URL, $module->getContainerUrl());
+		$module->setContainerNoScript('false');
+		self::assertFalse($module->getContainerNoScript());
+		foreach (['gtm-abc1234', 'G-ABC1234', 'GTM-', 'GTM-ABC 1234'] as $bad) {
+			try {
+				$module->setContainerId($bad);
+				self::fail("Expected $bad to be refused");
+			} catch (TInvalidDataValueException $e) {
+				self::assertTrue(true);
+			}
+		}
+		$this->expectException(TInvalidDataValueException::class);
+		$module->setContainerUrl('https://metrics.example.com/gtm.js?x=1');
+	}
+
+	public function testAContainerAloneLoadsTagManager()
+	{
+		$module = $this->probe(null);
+		$module->setContainerId('GTM-ABC1234');
+		$page = new HeadedPage();
+		$page->attachHead();
+		self::assertTrue($module->registerPageScripts($page));
+		$module->registerTag($page);
+		$cs = $page->getClientScript();
+		self::assertFalse($cs->isHeadScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY), 'No gtag.js file without a Measurement ID.');
+		self::assertTrue($cs->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		$script = $module->getTagScript($page);
+		self::assertStringStartsWith("window.dataLayer = window.dataLayer || [];\nfunction gtag(){dataLayer.push(arguments);}\n(function(w,d,s,l,i){", $script);
+		self::assertStringContainsString("'gtm.start'", $script);
+		self::assertStringContainsString('"https:\\/\\/www.googletagmanager.com\\/gtm.js"', $script);
+		self::assertStringEndsWith("'script',\"dataLayer\",\"GTM-ABC1234\");", $script);
+		self::assertStringNotContainsString("gtag('js'", $script);
+		self::assertStringNotContainsString("gtag('config'", $script);
+		self::assertSame($module->getContainerScript(), explode("\n", $script)[2]);
+	}
+
+	public function testGtagAndContainerTogether()
+	{
+		$module = $this->module();
+		$module->setContainerId('GTM-ABC1234');
+		$module->setConsentDefaults(['ad_storage' => 'denied']);
+		$lines = explode("\n", $module->getTagScript());
+		self::assertSame("gtag('consent', 'default', {'ad_storage':\"denied\"});", $lines[2]);
+		self::assertSame("gtag('js', new Date());", $lines[3]);
+		self::assertSame("gtag('config', \"G-TEST1234AB\");", $lines[4]);
+		self::assertStringStartsWith('(function(w,d,s,l,i)', $lines[5]);
+		self::assertCount(6, $lines);
+		self::assertTrue($module->getUsesGtag());
+	}
+
+	public function testContainerNoScriptHtml()
+	{
+		$module = $this->module();
+		$module->setContainerId('GTM-ABC1234');
+		self::assertSame('<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-ABC1234" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>', $module->getContainerNoScriptHtml());
+		$module->setContainerUrl('https://metrics.example.com/tag/gtm.js');
+		$module->setDataLayerName('siteData');
+		self::assertSame('<noscript><iframe src="https://metrics.example.com/tag/ns.html?id=GTM-ABC1234&amp;l=siteData" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>', $module->getContainerNoScriptHtml());
+	}
+
+	public function testTheNoScriptFrameIsInsertedAtTheTopOfTheForm()
+	{
+		$module = $this->probe();
+		$module->setContainerId('GTM-ABC1234');
+		$page = new HeadedPage();
+		$page->attachHead();
+		$form = new TForm();
+		$form->setID('form');
+		$page->getControls()->add($form);
+		$page->setForm($form);
+		$module->registerPageScripts($page);
+		$module->preRenderCompleteHandler($page, null);
+		$literal = $form->getControls()->itemAt(0);
+		self::assertInstanceOf(TLiteral::class, $literal);
+		self::assertSame(GAnalyticsModule::NOSCRIPT_ID, $literal->getID());
+		self::assertFalse($literal->getEncode());
+		self::assertSame($module->getContainerNoScriptHtml(), $literal->getText());
+
+		$quiet = $this->probe();
+		$quiet->setContainerId('GTM-ABC1234');
+		$quiet->setContainerNoScript(false);
+		$other = new TPage();
+		$otherForm = new TForm();
+		$other->setForm($otherForm);
+		$quiet->registerPageScripts($other);
+		$quiet->preRenderCompleteHandler($other, null);
+		self::assertSame(0, $otherForm->getControls()->getCount(), 'ContainerNoScript=false inserts nothing.');
+
+		$callback = new CallbackPage();
+		$callbackForm = new TForm();
+		$callback->setForm($callbackForm);
+		$module->registerPageScripts($callback);
+		$module->preRenderCompleteHandler($callback, null);
+		self::assertSame(0, $callbackForm->getControls()->getCount(), 'A callback gets no frame.');
+
+		$noForm = new TPage();
+		$module->registerPageScripts($noForm);
+		$module->preRenderCompleteHandler($noForm, null);
+		self::assertTrue(true, 'A page without a form is tolerated.');
+	}
+
+	public function testContainerOnlyEventsAreDataLayerPushes()
+	{
+		$module = $this->probe(null);
+		$module->setContainerId('GTM-ABC1234');
+		self::assertTrue($module->isDataLayerCall(['event', 'sign_up', ['method' => 'form']]));
+		self::assertFalse($module->isDataLayerCall(['consent', 'update', []]));
+		self::assertFalse($module->isDataLayerCall(['event', ['not a name']]));
+		self::assertSame(
+			"dataLayer.push({'event':\"sign_up\",'method':\"form\"});\ndataLayer.push({'event':\"tutorial_begin\"});\ngtag(\"consent\", \"update\", {'ad_storage':\"granted\"});",
+			$module->getCallsScript([['event', 'sign_up', ['method' => 'form']], ['event', 'tutorial_begin'], ['consent', 'update', ['ad_storage' => 'granted']]])
+		);
+		$module->setDataLayerName('siteData');
+		self::assertSame("siteData.push({'event':\"x\"});", $module->getCallsScript([['event', 'x']]));
+
+		$page = new CallbackPage();
+		$module->registerPageScripts($page);
+		$module->trackEvent('add_to_cart', ['value' => 1]);
+		$module->updateConsent(['ad_storage' => 'granted']);
+		$module->flushCalls($page);
+		self::assertSame([
+			['Prado.Element.evaluateScript' => ["siteData.push({'event':\"add_to_cart\",'value':1});", null]],
+			['gtag' => ['consent', 'update', ['ad_storage' => 'granted']]],
+		], $page->client->getClientFunctionsToExecute());
+
+		$module->setMeasurementId(self::ID);
+		self::assertFalse($module->isDataLayerCall(['event', 'x']), 'With gtag.js every call is a gtag call.');
+	}
+
+	public function testCspSourcesIncludeACustomContainerHost()
+	{
+		$module = $this->module();
+		$module->setTagUrl('https://metrics.example.com/gtag/js');
+		$module->setContainerUrl('https://metrics.example.com/gtm.js');
+		self::assertSame(1, substr_count(implode(' ', $module->getCspSources()[TCspDirective::ScriptSrc]), 'https://metrics.example.com'), 'One origin, once.');
+		$module->setContainerUrl('https://tags.example.org/gtm.js');
+		self::assertSame(['https://*.googletagmanager.com', 'https://metrics.example.com', 'https://tags.example.org'], $module->getCspSources()[TCspDirective::ScriptSrc]);
+	}
+
+	// =========================================================================
+	// PRADO events
+	// =========================================================================
+
+	public function testHookingAttachesTheErrorAndLoginHandlers()
+	{
+		$manager = new TAuthManager();
+		$this->registerModule($manager, 'auth');
+		$module = $this->probe();
+		$module->setTrackExceptions(true);
+		$module->setTrackLogins(true);
+		self::assertSame([$manager], array_values(array_filter($module->getAuthManagers(), fn ($m) => $m === $manager)));
+		$module->attachPageServiceHandler($this->_app, null);
+		self::assertTrue($this->_app->hasEventHandler('onError'));
+		self::assertTrue($manager->hasEventHandler('onLogin'));
+		self::assertTrue($manager->hasEventHandler('onLoginFailed'));
+		self::assertTrue($manager->hasEventHandler('onLogout'));
+		$before = $manager->getEventHandlers('onLogin')->getCount();
+		$module->attachPageServiceHandler($this->_app, null);
+		self::assertSame($before, $manager->getEventHandlers('onLogin')->getCount(), 'The application is hooked once per module.');
+
+		$quiet = $this->probe();
+		$quiet->attachPageServiceHandler($this->_app, null);
+		self::assertSame($before, $manager->getEventHandlers('onLogin')->getCount(), 'Track* off attaches nothing.');
+	}
+
+	public function testErrorHandlerSendsAnExceptionEvent()
+	{
+		$module = $this->probe();
+		$module->setApiSecret('s3cret');
+		self::assertTrue($module->errorHandler($this->_app, new THttpException(404, 'pageservice_page_unknown', 'Nope')));
+		$payload = $module->protocol->lastPayload();
+		self::assertSame('exception', $payload['events'][0]['name']);
+		$params = $payload['events'][0]['params'];
+		self::assertStringStartsWith('THttpException: ', $params['description']);
+		self::assertTrue($params['fatal']);
+		self::assertSame('THttpException', $params['error_type']);
+		self::assertSame(404, $params['status_code']);
+
+		self::assertTrue($module->errorHandler($this->_app, new \RuntimeException(str_repeat('x', 200))));
+		$params = $module->protocol->lastPayload()['events'][0]['params'];
+		self::assertSame(100, mb_strlen($params['description']), 'The description is cut to the GA4 limit.');
+		self::assertArrayNotHasKey('status_code', $params);
+
+		self::assertFalse($module->errorHandler($this->_app, 'not a throwable'));
+		self::assertCount(2, $module->protocol->posts);
+
+		$module->protocol->status = 500;
+		self::assertFalse($module->errorHandler($this->_app, new \RuntimeException('x')), 'A refused request is false.');
+
+		$module->setMeasurementId(null);
+		self::assertFalse($module->errorHandler($this->_app, new \RuntimeException('x')), 'A failing send is caught.');
+
+		$module->setApiSecret(null);
+		$module->setMeasurementId(self::ID);
+		self::assertFalse($module->errorHandler($this->_app, new \RuntimeException('x')), 'Without an ApiSecret nothing is sent.');
+		self::assertCount(3, $module->protocol->posts);
+	}
+
+	public function testLoginHandlersQueueEvents()
+	{
+		$module = $this->probe();
+		$module->setLoginMethod(' sso ');
+		self::assertSame('sso', $module->getLoginMethod());
+		$module->loginHandler(new TAuthManager(), new FakeUser('alice', false));
+		$module->logoutHandler(new TAuthManager(), new FakeUser('alice', false));
+		self::assertSame([['event', 'login', ['method' => 'sso']], ['event', 'logout']], $module->deferred(), 'Login and logout wait for the next page.');
+
+		$page = new TPage();
+		$module->registerPageScripts($page);
+		$module->loginFailedHandler(new TAuthManager(), 'alice');
+		self::assertSame([['event', 'login_failed', ['method' => 'sso']]], $module->getQueuedCalls(), 'A failed login stays on the page.');
+		$module->setLoginMethod('');
+		self::assertSame('form', $module->getLoginMethod());
+	}
+
+	public function testValidationErrorsAreTracked()
+	{
+		$module = $this->probe();
+		$module->setTrackValidationErrors(true);
+		$page = new PostBackPage();
+		$page->setPagePath('Account.Register');
+		$ok = new TRequiredFieldValidator();
+		$ok->setID('emailRequired');
+		$bad = new TRequiredFieldValidator();
+		$bad->setID('nameRequired');
+		$bad->setIsValid(false);
+		$page->getValidators()->add($ok);
+		$page->getValidators()->add($bad);
+		$module->registerPageScripts($page);
+		$module->preRenderCompleteHandler($page, null);
+		self::assertTrue($page->getClientScript()->isEndScriptRegistered(GAnalyticsModule::CALLS_SCRIPT_KEY));
+		self::assertSame([], $module->getQueuedCalls());
+
+		$again = new PostBackPage();
+		$again->getValidators()->add($bad);
+		self::assertTrue($module->trackValidationErrors($again));
+		self::assertSame([['event', 'form_error', ['form_id' => '', 'error_count' => 1, 'validators' => 'nameRequired']]], $module->deferred(), 'Without a registered page the event is deferred.');
+
+		$valid = new PostBackPage();
+		$valid->getValidators()->add($ok);
+		self::assertFalse($module->trackValidationErrors($valid));
+		$get = new TPage();
+		$get->getValidators()->add($bad);
+		self::assertFalse($module->trackValidationErrors($get), 'A GET request has no form submission.');
+
+		$off = $this->probe();
+		$off->registerPageScripts($page);
+		$off->preRenderCompleteHandler($page, null);
+		self::assertSame([], $off->getQueuedCalls());
+		self::assertSame([], $off->deferred(), 'TrackValidationErrors=false tracks nothing.');
+	}
+
+	// =========================================================================
+	// Consent provider
+	// =========================================================================
+
+	public function testConsentProviderOverridesTheDefaults()
+	{
+		$module = $this->probe();
+		$module->setConsentDefaults(['ad_storage' => 'denied', 'analytics_storage' => 'denied', 'wait_for_update' => 500]);
+		$consent = new FakeConsentModule();
+		$consent->state = ['analytics_storage' => 'granted'];
+		$module->setConsentProvider($consent);
+		self::assertSame($consent, $module->getConsentProvider());
+		self::assertSame(['ad_storage' => 'denied', 'analytics_storage' => 'granted', 'wait_for_update' => 500], $module->getEffectiveConsentDefaults());
+		self::assertStringContainsString("gtag('consent', 'default', {'ad_storage':\"denied\",'analytics_storage':\"granted\",'wait_for_update':500});", $module->getTagScript());
+
+		$module->updateConsent(['ad_storage' => 'granted', 'wait_for_update' => 500, 'bogus' => 'granted']);
+		self::assertSame([['ad_storage' => 'granted']], $consent->updates, 'Only known consent types are stored.');
+		self::assertSame(['ad_storage' => 'granted', 'analytics_storage' => 'granted', 'wait_for_update' => 500], $module->getEffectiveConsentDefaults());
+		$module->updateConsent(['wait_for_update' => 1]);
+		self::assertCount(1, $consent->updates, 'Nothing storable, nothing stored.');
+		self::assertSame([['consent', 'update', ['ad_storage' => 'granted', 'wait_for_update' => 500, 'bogus' => 'granted']], ['consent', 'update', ['wait_for_update' => 1]]], $module->deferred());
+
+		$module->setConsentProvider('');
+		self::assertNull($module->getConsentProvider());
+	}
+
+	public function testConsentProviderResolvesAModuleIdOrAConfiguration()
+	{
+		$consent = new FakeConsentModule();
+		$consent->state = ['ad_storage' => 'granted'];
+		$id = $this->registerModule($consent, 'consent');
+		$module = $this->probe();
+		$module->setConsentProvider($id);
+		self::assertSame($consent, $module->getConsentProvider());
+		self::assertSame(['ad_storage' => 'granted'], $module->getEffectiveConsentDefaults());
+
+		$module->setConsentProvider(['class' => FakeConsentModule::class, 'id' => 'ignored']);
+		self::assertInstanceOf(FakeConsentModule::class, $module->getConsentProvider());
+		self::assertNotSame($consent, $module->getConsentProvider());
+
+		$module->setConsentProvider('no-such-module-' . uniqid());
+		try {
+			$module->getConsentProvider();
+			self::fail('Expected an exception');
+		} catch (TConfigurationException $e) {
+			self::assertTrue(true);
+		}
+		$module->setConsentProvider($this->registerModule(new TAuthManager(), 'auth'));
+		try {
+			$module->getConsentProvider();
+			self::fail('Expected an exception');
+		} catch (TConfigurationException $e) {
+			self::assertTrue(true);
+		}
+		$this->expectException(TConfigurationException::class);
+		$module->setConsentProvider(['class' => TAuthManager::class]);
+	}
+
+	// =========================================================================
+	// Data API
+	// =========================================================================
+
+	public function testRunReportUsesThePropertyAndTheCredentials()
+	{
+		$module = $this->probe();
+		$module->setPropertyId('properties/123');
+		self::assertSame('123', $module->getPropertyId());
+		$module->setCredentials(new GAnalyticsAccessTokenCredentials('tok'));
+		$module->dataApi->answer(GAnalyticsReportTest::response());
+		$report = $module->runReport(['activeUsers'], ['country'], '7daysAgo', 'today', ['limit' => 3]);
+		self::assertInstanceOf(GAnalyticsReport::class, $report);
+		self::assertCount(2, $report);
+		self::assertSame($module->dataApi, $module->getDataApi());
+		self::assertStringEndsWith('properties/123:runReport', $module->dataApi->requests[0]['url']);
+		self::assertContains('Authorization: Bearer tok', $module->dataApi->requests[0]['headers']);
+		self::assertSame(3, $module->dataApi->lastBody()['limit']);
+		self::assertSame([['name' => 'country']], $module->dataApi->lastBody()['dimensions']);
+	}
+
+	public function testRealtimeReportAndPollRaiseTheEvent()
+	{
+		$module = $this->probe();
+		$module->setPropertyId('123');
+		$module->setCredentials(new GAnalyticsAccessTokenCredentials('tok'));
+		$module->setRealtimeMetrics('activeUsers, eventCount,, activeUsers');
+		$module->setRealtimeDimensions(['country']);
+		self::assertSame(['activeUsers', 'eventCount'], $module->getRealtimeMetrics());
+		self::assertSame(['country'], $module->getRealtimeDimensions());
+		$module->dataApi->answer(['metricHeaders' => [['name' => 'activeUsers', 'type' => 'TYPE_INTEGER'], ['name' => 'eventCount', 'type' => 'TYPE_INTEGER']], 'dimensionHeaders' => [['name' => 'country']], 'rows' => [['dimensionValues' => [['value' => 'US']], 'metricValues' => [['value' => '4'], ['value' => '10']]]]]);
+
+		$seen = [];
+		$module->attachEventHandler('onRealtimeReport', function ($sender, TEventParameter $param) use (&$seen) {
+			$seen[] = $param->getParameter();
+		});
+		$report = $module->pollRealtime();
+		self::assertSame([['country' => 'US', 'activeUsers' => 4, 'eventCount' => 10]], $report->getRows());
+		self::assertSame([$report], $seen);
+		self::assertStringEndsWith('properties/123:runRealtimeReport', $module->dataApi->requests[0]['url']);
+		self::assertSame(['metrics' => [['name' => 'activeUsers'], ['name' => 'eventCount']], 'dimensions' => [['name' => 'country']]], $module->dataApi->lastBody());
+
+		$module->runRealtimeReport(['screenPageViews'], [], ['limit' => 2]);
+		self::assertSame(['metrics' => [['name' => 'screenPageViews']], 'limit' => 2], $module->dataApi->lastBody());
+
+		$module->setRealtimeMetrics('');
+		$module->setRealtimeDimensions('');
+		self::assertSame(['activeUsers'], $module->getRealtimeMetrics());
+		self::assertSame([], $module->getRealtimeDimensions());
+	}
+
+	public function testReportsNeedAPropertyAndCredentials()
+	{
+		$module = $this->probe();
+		$module->setCredentials(new GAnalyticsAccessTokenCredentials('tok'));
+		try {
+			$module->runReport(['activeUsers']);
+			self::fail('Expected an exception');
+		} catch (TConfigurationException $e) {
+			self::assertSame([], $module->dataApi->requests);
+		}
+		$module->setPropertyId('1');
+		$module->setCredentials(null);
+		$this->expectException(TConfigurationException::class);
+		$module->runReport(['activeUsers']);
+	}
+
+	public function testCredentialsResolveAModuleIdOrAConfiguration()
+	{
+		$credentials = new FakeCredentialsModule();
+		$id = $this->registerModule($credentials, 'creds');
+		$module = $this->probe();
+		$module->setPropertyId('1');
+		$module->setCredentials($id);
+		self::assertSame($credentials, $module->getCredentials());
+		$module->dataApi->answer(['dimensions' => []]);
+		$module->getDataApi()->getMetadata();
+		self::assertContains('Authorization: Bearer module-token', $module->dataApi->requests[0]['headers']);
+
+		$module->setCredentials(['class' => GAnalyticsAccessTokenCredentials::class, 'AccessToken' => 'configured']);
+		self::assertSame('configured', $module->getCredentials()->getAccessToken());
+		self::assertSame($module->adminApi, $module->getAdminApi());
+		self::assertSame('configured', $module->getAdminApi()->getCredentials()->getAccessToken());
+
+		$module->setCredentials('');
+		self::assertNull($module->getCredentials());
+
+		$module->setCredentials('no-such-module-' . uniqid());
+		try {
+			$module->getCredentials();
+			self::fail('Expected an exception');
+		} catch (TConfigurationException $e) {
+			self::assertTrue(true);
+		}
+		try {
+			$module->setCredentials(['AccessToken' => 'no class']);
+			self::fail('Expected an exception');
+		} catch (TConfigurationException $e) {
+			self::assertTrue(true);
+		}
+		$this->expectException(TConfigurationException::class);
+		$module->setCredentials(['class' => \stdClass::class]);
+	}
+
+	public function testPropertyIdIsValidated()
+	{
+		$module = new GAnalyticsModule();
+		$module->setPropertyId('');
+		self::assertNull($module->getPropertyId());
+		$this->expectException(TInvalidDataValueException::class);
+		$module->setPropertyId('abc');
+	}
+
+	// =========================================================================
+	// Configuration elements and the shell
+	// =========================================================================
+
+	public function testInitReadsCredentialsAndConsentElements()
+	{
+		$config = new TXmlElement('module');
+		$credentials = new TXmlElement('credentials');
+		$credentials->setAttribute('class', GAnalyticsAccessTokenCredentials::class);
+		$credentials->setAttribute('AccessToken', 'from-xml');
+		$config->getElements()->add($credentials);
+		$consent = new TXmlElement('consent');
+		$consent->setAttribute('class', FakeConsentModule::class);
+		$config->getElements()->add($consent);
+		$module = $this->probe();
+		$module->init($config);
+		self::assertSame('from-xml', $module->getCredentials()->getAccessToken());
+		self::assertInstanceOf(FakeConsentModule::class, $module->getConsentProvider());
+		$this->_app->detachEventHandler('onInitComplete', [$module, 'attachPageServiceHandler']);
+
+		$module = $this->probe();
+		$module->init(['credentials' => ['class' => GAnalyticsAccessTokenCredentials::class, 'AccessToken' => 'from-php'], 'consent' => ['class' => FakeConsentModule::class]]);
+		self::assertSame('from-php', $module->getCredentials()->getAccessToken());
+		self::assertInstanceOf(FakeConsentModule::class, $module->getConsentProvider());
+		$this->_app->detachEventHandler('onInitComplete', [$module, 'attachPageServiceHandler']);
+	}
+
+	public function testShellActionIsRegisteredWithAShellApplication()
+	{
+		$module = $this->probe();
+		self::assertFalse($module->registerShellAction(), 'A web application gets no shell action.');
+
+		$shell = new TShellApplication(__DIR__ . '/app', false);
+		try {
+			self::assertTrue($module->registerShellAction());
+			self::assertTrue($shell->hasShellActionClass(GAnalyticsShellAction::class));
+			self::assertFalse($module->registerShellAction(), 'Registered once.');
+			$action = $shell->getShellActions()[GAnalyticsShellAction::class];
+			self::assertInstanceOf(GAnalyticsShellAction::class, $action);
+			self::assertSame($module, $action->getModule());
+		} finally {
+			Prado::setApplication($this->_app);
+		}
+	}
+
+	public function testShellClassMustBeAShellAction()
+	{
+		$module = new GAnalyticsModule();
+		$module->setShellClass(GAnalyticsShellAction::class);
+		self::assertSame(GAnalyticsShellAction::class, $module->getShellClass());
+		$module->setShellClass('');
+		self::assertSame(GAnalyticsShellAction::class, $module->getShellClass());
+		$this->expectException(TConfigurationException::class);
+		$module->setShellClass(\stdClass::class);
 	}
 
 	public function testAdditionalMeasurementIdsAcceptListsAndConfigureMoreTags()
@@ -239,7 +784,8 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame([], $module->getEffectiveConfigOptions(), 'No page, no group.');
 		self::assertStringContainsString("gtag('config', \"G-TEST1234AB\", {'content_group':\"Admin.Users\"});", $module->getTagScript($page));
 		$module->registerPageScripts($page);
-		self::assertTrue($page->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		$module->preRenderCompleteHandler($page, null);
+		self::assertTrue($page->getClientScript()->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
 	}
 
 	public function testUserIdComesFromThePropertyOrTheAuthenticatedUser()
@@ -341,6 +887,40 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame([], $module->deferred());
 	}
 
+	public function testTheSessionStoreOpensOnlyWhenNeeded()
+	{
+		$session = new FakeSession();
+		$previous = $this->_app->getSession();
+		$this->_app->setSession($session);
+		$cookies = $this->_app->getRequest()->getCookies();
+		$cookie = new THttpCookie('FAKESESSID', 'abc');
+		try {
+			$module = $this->module();
+			$page = new TPage();
+			$module->registerPageScripts($page);
+			self::assertSame(0, $module->flushCalls($page), 'Without a session cookie nothing is read.');
+			self::assertSame(0, $session->opens, 'A read without a session cookie opens no session.');
+
+			$module->trackEvent('login', [], true);
+			self::assertSame(1, $session->opens, 'A write opens the session.');
+			self::assertSame([['event', 'login']], $session->data[GAnalyticsModule::SESSION_KEY]);
+			$module->trackEvent('logout', [], true);
+			self::assertSame(1, $session->opens, 'An open session is reused.');
+			self::assertCount(2, $session->data[GAnalyticsModule::SESSION_KEY]);
+
+			$session->started = false;
+			$cookies->add($cookie);
+			$next = new TPage();
+			$module->registerPageScripts($next);
+			self::assertSame(2, $module->flushCalls($next), 'With a session cookie the deferred calls are read.');
+			self::assertSame(2, $session->opens);
+			self::assertArrayNotHasKey(GAnalyticsModule::SESSION_KEY, $session->data);
+		} finally {
+			$cookies->remove($cookie);
+			$this->_app->setSession($previous);
+		}
+	}
+
 	public function testWithoutASessionDeferredCallsAreDropped()
 	{
 		$module = $this->probe();
@@ -350,6 +930,7 @@ class GAnalyticsModuleTest extends TestCase
 		$page = new TPage();
 		$module->registerPageScripts($page);
 		self::assertSame(0, $module->flushCalls($page));
+		self::assertSame([true, false], $module->storeLookups, 'A store is asked for writing, then for reading.');
 	}
 
 	public function testCallbackRequestsDeliverCallsThroughTheCallbackClient()
@@ -845,13 +1426,17 @@ class GAnalyticsModuleTest extends TestCase
 	public function testRegisterPageScriptsRegistersTheHeadScripts()
 	{
 		$module = $this->module();
-		$page = new TPage();
+		$page = new HeadedPage();
+		$page->attachHead();
 		self::assertTrue($module->registerPageScripts($page));
 		$cs = $page->getClientScript();
+		self::assertTrue($page->hasEventHandler('onPreRenderComplete'), 'The registration waits for onPreRenderComplete.');
+		self::assertFalse($cs->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		$module->preRenderCompleteHandler($page, null);
 		self::assertTrue($cs->isHeadScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
 		self::assertTrue($cs->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
 		self::assertSame([$module->getTagScriptUrl()], $cs->getScriptUrls(), 'The async script file is the tag URL.');
-		self::assertTrue($page->hasEventHandler('onPreRenderComplete'), 'The form fallback is armed.');
+		self::assertFalse($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY), 'With a THead nothing goes in the form.');
 	}
 
 	public function testRegisterPageScriptsSkipsADisabledModule()
@@ -860,7 +1445,6 @@ class GAnalyticsModuleTest extends TestCase
 		$module->setEnabled(false);
 		$page = new TPage();
 		self::assertFalse($module->registerPageScripts($page));
-		self::assertFalse($page->getClientScript()->isHeadScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
 		self::assertFalse($page->hasEventHandler('onPreRenderComplete'));
 	}
 
@@ -869,15 +1453,17 @@ class GAnalyticsModuleTest extends TestCase
 		$module = new GAnalyticsModule();
 		$page = new TPage();
 		self::assertFalse($module->registerPageScripts($page));
-		self::assertFalse($page->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		self::assertFalse($page->hasEventHandler('onPreRenderComplete'));
 	}
 
 	public function testRegisterPageScriptsUsesTheApplicationParameter()
 	{
 		$module = new GAnalyticsModule();
 		$this->_app->getParameters()->add(GAnalyticsModule::MEASUREMENT_ID_PARAMETER, 'G-FROMPARAM1');
-		$page = new TPage();
+		$page = new HeadedPage();
+		$page->attachHead();
 		self::assertTrue($module->registerPageScripts($page));
+		$module->registerTag($page);
 		self::assertSame(['https://www.googletagmanager.com/gtag/js?id=G-FROMPARAM1'], $page->getClientScript()->getScriptUrls());
 	}
 
@@ -900,7 +1486,6 @@ class GAnalyticsModuleTest extends TestCase
 		});
 		$other = new TPage();
 		self::assertFalse($module->registerPageScripts($other));
-		self::assertFalse($other->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
 		self::assertFalse($other->hasEventHandler('onPreRenderComplete'));
 	}
 
@@ -909,13 +1494,13 @@ class GAnalyticsModuleTest extends TestCase
 		$module = $this->module();
 		$page = new TPage();
 		$module->preRunPageHandler(new TPageService(), $page);
-		self::assertTrue($page->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		self::assertTrue($page->hasEventHandler('onPreRenderComplete'));
 		$module->preRunPageHandler(new TPageService(), null);
 		$module->preRunPageHandler(new TPageService(), new \stdClass());
 		self::assertTrue(true, 'A parameter that is not a page is ignored.');
 	}
 
-	public function testFormFallbackRegistersOnAPageWithoutAHead()
+	public function testAPageWithoutAHeadGetsTheTagInItsForm()
 	{
 		$module = $this->module();
 		$page = new TPage();
@@ -924,23 +1509,12 @@ class GAnalyticsModuleTest extends TestCase
 		$cs = $page->getClientScript();
 		self::assertTrue($cs->isScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
 		self::assertTrue($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
-		self::assertSame([$module->getTagScriptUrl()], $cs->getScriptUrls(), 'The head and form entries are one URL.');
+		self::assertFalse($cs->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY), 'No head registration without a THead: PRADO would refuse to render the page.');
+		self::assertFalse($cs->isHeadScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
+		self::assertSame([$module->getTagScriptUrl()], $cs->getScriptUrls());
 	}
 
-	public function testFormFallbackLeavesAPageWithAHeadAlone()
-	{
-		$module = $this->module();
-		$page = new HeadedPage();
-		$page->attachHead();
-		$module->registerPageScripts($page);
-		$module->preRenderCompleteHandler($page, null);
-		$cs = $page->getClientScript();
-		self::assertTrue($cs->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
-		self::assertFalse($cs->isScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
-		self::assertFalse($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
-	}
-
-	public function testFormFallbackLeavesACallbackAlone()
+	public function testACallbackGetsNoTag()
 	{
 		$module = $this->module();
 		$page = new CallbackPage();
@@ -949,6 +1523,7 @@ class GAnalyticsModuleTest extends TestCase
 		$cs = $page->getClientScript();
 		self::assertFalse($cs->isScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
 		self::assertFalse($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		self::assertFalse($cs->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
 		$module->preRenderCompleteHandler(new \stdClass(), null);
 		self::assertTrue(true, 'A sender that is not a page is ignored.');
 	}
@@ -970,7 +1545,7 @@ class GAnalyticsModuleTest extends TestCase
 
 		$page = new TPage();
 		$service->onPreRunPage($page);
-		self::assertTrue($page->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::SCRIPT_KEY));
+		self::assertTrue($page->hasEventHandler('onPreRenderComplete'), 'The page is armed.');
 		$this->_app->detachEventHandler('onInitComplete', [$module, 'attachPageServiceHandler']);
 	}
 

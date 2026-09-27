@@ -19,17 +19,29 @@ This release brings the extension to PRADO 4.4 and its current extension convent
 - `GAnalyticsPageBehavior`, a class behavior the module attaches to `TPage` (`AttachPageBehavior`), so pages call `$this->trackEvent(…)` and `$this->getGAnalytics()`.
 - `GAnalyticsMeasurementProtocol` and `sendEvent()`: events from PHP over the Measurement Protocol (`ApiSecret`), under the visitor's `_ga` client id (`getClientId()`), timestamped from PRADO's clock; `DebugMode` uses the validation endpoint.
 - `AmendCsp`: Google's hosts are added to every `THttpHeaderCsp` of the application's `THttpHeadersManager` modules (`amendCspPolicies()`, `amendCspHeader()`, `getCspSources()`).
+- Google Tag Manager: `ContainerId`, `ContainerUrl`, `ContainerNoScript`; the loader in the snippet, the `<noscript>` frame at the top of the form, and `dataLayer.push({event: …})` delivery for a container without a Measurement ID (`getContainerScript()`, `getContainerNoScriptHtml()`, `isDataLayerCall()`).
+- PRADO event hooks: `TrackExceptions` (`TApplication::onError` → `exception` over the Measurement Protocol), `TrackLogins` (`TAuthManager` `onLogin`/`onLoginFailed`/`onLogout` → `login`, `login_failed`, `logout`, with `LoginMethod`), `TrackValidationErrors` (failed validators on a postback → `form_error`); `getAuthManagers()`, `errorHandler()`, `getExceptionParams()`, `trackValidationErrors()`.
+- Consent seam: `IGAnalyticsConsentProvider`, `IGAnalyticsConsentStore`, `ConsentProvider` (a module id, an instance, or a `<consent>` element), `getEffectiveConsentDefaults()`; `updateConsent()` records the choice through a store. `GAnalyticsCookieConsentProvider`, a cookie-backed store module (`CookieName`, `Expires`).
+- Data API: `GAnalyticsDataApi` (`runReport`, `runRealtimeReport`, `batchRunReports`, `runPivotReport`, `batchRunPivotReports`, `getMetadata`, `checkCompatibility`, `call`, `reportRequest()`, `realtimeRequest()`), `GAnalyticsReport` (typed rows for data binding, totals, iteration), `GAnalyticsAdminApi` (account summaries, properties, data streams, Measurement Protocol secrets), `GAnalyticsApiClient` (the JSON client base with `request()` and `requestAll()`), `GAnalyticsApiException`.
+- Credentials seam: `IGAnalyticsCredentials`, `GAnalyticsServiceAccountCredentials` (service account JWT, RS256, token reuse and application-cache sharing, `KeyFile`/`Key`/`Scopes`/`Timeout`), `GAnalyticsAccessTokenCredentials`. On the module: `PropertyId`, `Credentials` (a module id, an instance, or a `<credentials>` element), `runReport()`, `runRealtimeReport()`, `getDataApi()`, `getAdminApi()`, `getCredentials()`.
+- Realtime polling: `RealtimeMetrics`, `RealtimeDimensions`, `pollRealtime()` and the `onRealtimeReport` event, for a `TCronModule` job that publishes live figures.
+- `GAnalyticsShellAction`: `prado-cli ganalytics/status`, `send`, `validate`, `report`, `realtime` and `properties`, registered by the module in a `TShellApplication` (`ShellClass`, `registerShellAction()`).
+- `GAnalyticsHttpTransportTrait`: the one HTTP transport seam of the extension.
+- End-to-end tests: two PRADO applications under `tests/playwright` served by PHP's built-in server, Playwright specs for the tag, the CSP header and nonce, callbacks, deferred events, validation tracking and Tag Manager; a `live` phpunit suite against a real property gated on `GA4_*` secrets (`composer livetest`); CI jobs for coverage, Playwright (Chromium, Firefox, WebKit) and the live suite.
 - `onPreRegisterScript`: raised with a `TEventParameter` carrying the page; stopping it leaves the page without the tag.
-- `registerPageScripts()`, `getIsActive()`, `getTagScriptUrl()`, `getTagScript()`, `getEffectiveConfigOptions()` and `getEffectiveUserId()` as public API.
+- `registerPageScripts()`, `registerTag()`, `getIsActive()`, `getUsesGtag()`, `getHasTag()`, `getTagScriptUrl()`, `getTagScript()`, `getEffectiveConfigOptions()` and `getEffectiveUserId()` as public API.
 - A page without a `THead` receives the tag at the beginning of its form.
 - A module loaded after the application initialized (a lazy module) hooks the running page service at once.
 - `config/classMap.json` (the Prado3 short names) and `config/errorMessages.txt` (`ganalytics_*` error codes), both registered by Composer from `extra.prado`.
-- Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`, 117 tests), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
+- Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`, 192 tests), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
 - `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`.
 
 ### Changed
 - Requires PHP 8.1+ and PRADO `^4.4@dev`. The bootstrap class is declared under `extra.prado.bootstrap`.
 - The Measurement ID is validated (`G-`, `AW-`, `DC-`, `GT-`, `UA-` forms); an invalid module property is refused when set, and an invalid application parameter when the page runs.
+- The tag is armed at `TPageService::onPreRunPage` and registered at `TPage::onPreRenderComplete`, when the page knows whether it has a `THead`; a page without one gets the scripts at the beginning of its form (PRADO refuses a head registration on such a page), and a callback request gets no tag.
+- Deferred calls open the session for a write, and for a read only when the request carries a session cookie.
+- `composer.json` suggests `ext-openssl`, `belisoful/prado-webhooks` and `belisoful/prado-websocket`.
 - The application parameter is read on every page rather than cached into the module on first use.
 - The id is URL-encoded in the script URL and JavaScript-encoded in the script block.
 - Properties are typed and coerced with `TPropertyValue`; the docblocks, `@link` and `@license` headers follow the current PRADO conventions.

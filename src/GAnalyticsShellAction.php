@@ -104,12 +104,11 @@ class GAnalyticsShellAction extends TShellAction
 		if ($this->_module === false) {
 			$this->_module = null;
 			$app = Prado::getApplication();
-			foreach ($app->getModulesByType(GAnalyticsModule::class) as $id => $module) {
-				$module ??= $app->getModule($id);
-				if ($module instanceof GAnalyticsModule) {
-					$this->_module = $module;
-					break;
-				}
+			foreach (\array_keys($app->getModulesByType(GAnalyticsModule::class)) as $id) {
+				$module = $app->getModule($id);   // loads a lazy module; returns a loaded one as is
+				\assert($module instanceof GAnalyticsModule);
+				$this->_module = $module;
+				break;
 			}
 		}
 		if ($this->_module === null) {
@@ -154,16 +153,16 @@ class GAnalyticsShellAction extends TShellAction
 			['Module', (string) $module->getID()],
 			['Active', $module->getIsActive() ? 'yes' : 'no (Enabled=' . ($module->getEnabled() ? 'true' : 'false') . ', mode ' . $module->getApplication()->getMode() . ')'],
 			['Measurement ID', $idText],
-			['Additional IDs', implode(', ', $module->getAdditionalMeasurementIds()) ?: '-'],
+			['Additional IDs', \implode(', ', $module->getAdditionalMeasurementIds()) ?: '-'],
 			['Container', $module->getContainerId() ?? '-'],
 			['Tag URL', $id !== null ? $module->getTagScriptUrl() : $module->getTagUrl()],
 			['Data layer', $module->getDataLayerName()],
-			['Enabled modes', implode(', ', $module->getEnabledModes()) ?: 'all'],
-			['Config options', json_encode($valid ? $module->getEffectiveConfigOptions() : [], JSON_UNESCAPED_SLASHES)],
-			['Consent defaults', json_encode($module->getEffectiveConsentDefaults(), JSON_UNESCAPED_SLASHES)],
+			['Enabled modes', \implode(', ', $module->getEnabledModes()) ?: 'all'],
+			['Config options', \json_encode($valid ? $module->getEffectiveConfigOptions() : [], JSON_UNESCAPED_SLASHES)],
+			['Consent defaults', \json_encode($module->getEffectiveConsentDefaults(), JSON_UNESCAPED_SLASHES)],
 			['Consent provider', $this->describeObject($module->getConsentProvider())],
 			['User id', $module->getUserIdFromUser() ? 'from the application user' : ($module->getUserId() ?? '-')],
-			['Tracking', implode(', ', array_keys(array_filter(['exceptions' => $module->getTrackExceptions(), 'logins' => $module->getTrackLogins(), 'validation errors' => $module->getTrackValidationErrors()]))) ?: '-'],
+			['Tracking', \implode(', ', \array_keys(\array_filter(['exceptions' => $module->getTrackExceptions(), 'logins' => $module->getTrackLogins(), 'validation errors' => $module->getTrackValidationErrors()]))) ?: '-'],
 			['Page behavior', $module->getAttachPageBehavior() ? 'attached' : 'off'],
 			['Amend CSP', $module->getAmendCsp() ? 'yes' : 'no'],
 			['API secret', $module->getApiSecret() !== null ? 'set' : '-'],
@@ -216,9 +215,9 @@ class GAnalyticsShellAction extends TShellAction
 			return true;
 		}
 		$writer = $this->getWriter();
-		array_shift($args);
-		$name = (string) array_shift($args);
-		$params = $this->decodeJson(array_shift($args), 'params');
+		\array_shift($args);
+		$name = (string) \array_shift($args);
+		$params = $this->decodeJson(\array_shift($args), 'params');
 		if ($params === null) {
 			return true;
 		}
@@ -227,7 +226,7 @@ class GAnalyticsShellAction extends TShellAction
 			$mp->setDebug($validate || $module->getDebugMode());
 			$clientId = $this->_clientId ?? $module->getClientId() ?? $mp->newClientId();
 			$event = ['name' => $name];
-			if (count($params) > 0) {
+			if (\count($params) > 0) {
 				$event['params'] = $params;
 			}
 			$accepted = $mp->send($clientId, [$event], $this->_userId ?? $module->getEffectiveUserId());
@@ -242,17 +241,17 @@ class GAnalyticsShellAction extends TShellAction
 		$writer->write($clientId, [TShellWriter::BOLD]);
 		$writer->writeLine($accepted ? ': accepted' : ': refused', [$accepted ? TShellWriter::GREEN : TShellWriter::RED]);
 		$response = $mp->getLastResponse();
-		if (is_string($response) && trim($response) !== '') {
-			$decoded = json_decode($response, true);
-			$messages = is_array($decoded) ? ($decoded['validationMessages'] ?? null) : null;
-			if (is_array($messages) && count($messages) === 0) {
+		if (\is_string($response) && \trim($response) !== '') {
+			$decoded = \json_decode($response, true);
+			$messages = \is_array($decoded) ? ($decoded['validationMessages'] ?? null) : null;
+			if (\is_array($messages) && \count($messages) === 0) {
 				$writer->writeLine('  No validation messages.', [TShellWriter::GREEN]);
-			} elseif (is_array($messages)) {
+			} elseif (\is_array($messages)) {
 				foreach ($messages as $message) {
-					$writer->writeLine('  ' . json_encode($message, JSON_UNESCAPED_SLASHES), [TShellWriter::RED]);
+					$writer->writeLine('  ' . \json_encode($message, JSON_UNESCAPED_SLASHES), [TShellWriter::RED]);
 				}
 			} else {
-				$writer->writeLine('  ' . trim($response));
+				$writer->writeLine('  ' . \trim($response));
 			}
 		}
 		$writer->writeLine();
@@ -269,11 +268,11 @@ class GAnalyticsShellAction extends TShellAction
 		if (($module = $this->getModule()) === null) {
 			return true;
 		}
-		array_shift($args);
-		$metrics = $this->names(array_shift($args));
-		$dimensions = $this->names(array_shift($args));
-		$start = (string) (array_shift($args) ?? '28daysAgo');
-		$end = (string) (array_shift($args) ?? 'today');
+		\array_shift($args);
+		$metrics = $this->names(\array_shift($args));
+		$dimensions = $this->names(\array_shift($args));
+		$start = (string) (\array_shift($args) ?? '28daysAgo');
+		$end = (string) (\array_shift($args) ?? 'today');
 		$extra = $this->_limit !== null ? ['limit' => $this->_limit] : [];
 		return $this->printReport(fn () => $this->api($module)->runReport(GAnalyticsDataApi::reportRequest($metrics, $dimensions, $start, $end, $extra)), "Report {$start} to {$end}");
 	}
@@ -288,9 +287,9 @@ class GAnalyticsShellAction extends TShellAction
 		if (($module = $this->getModule()) === null) {
 			return true;
 		}
-		array_shift($args);
-		$metrics = $this->names(array_shift($args)) ?: $module->getRealtimeMetrics();
-		$dimensions = $this->names(array_shift($args)) ?: $module->getRealtimeDimensions();
+		\array_shift($args);
+		$metrics = $this->names(\array_shift($args)) ?: $module->getRealtimeMetrics();
+		$dimensions = $this->names(\array_shift($args)) ?: $module->getRealtimeDimensions();
 		$extra = $this->_limit !== null ? ['limit' => $this->_limit] : [];
 		return $this->printReport(fn () => $this->api($module)->runRealtimeReport(GAnalyticsDataApi::realtimeRequest($metrics, $dimensions, $extra)), 'Realtime report');
 	}
@@ -369,22 +368,22 @@ class GAnalyticsShellAction extends TShellAction
 		$writer->writeLine();
 		$writer->writeLine($title . ' (' . $report->getRowCount() . ' rows)', [TShellWriter::BOLD]);
 		$columns = $report->getColumns();
-		if (count($report) === 0) {
+		if (\count($report) === 0) {
 			$writer->writeLine('  (no rows)');
 		} else {
-			$widths = array_map('strlen', $columns);
+			$widths = \array_map('strlen', $columns);
 			$rows = [];
 			foreach ($report as $row) {
 				$cells = [];
 				foreach ($columns as $i => $column) {
 					$cells[] = (string) ($row[$column] ?? '');
-					$widths[$i] = max($widths[$i], strlen(end($cells)));
+					$widths[$i] = \max($widths[$i], \strlen(\end($cells)));
 				}
 				$rows[] = $cells;
 			}
-			$writer->writeLine('  ' . implode('  ', array_map(fn ($column, $i) => $writer->pad($column, $widths[$i]), $columns, array_keys($columns))), [TShellWriter::UNDERLINE]);
+			$writer->writeLine('  ' . \implode('  ', \array_map(fn ($column, $i) => $writer->pad($column, $widths[$i]), $columns, \array_keys($columns))), [TShellWriter::UNDERLINE]);
 			foreach ($rows as $cells) {
-				$writer->writeLine('  ' . implode('  ', array_map(fn ($cell, $i) => $writer->pad($cell, $widths[$i]), $cells, array_keys($cells))));
+				$writer->writeLine('  ' . \implode('  ', \array_map(fn ($cell, $i) => $writer->pad($cell, $widths[$i]), $cells, \array_keys($cells))));
 			}
 		}
 		$writer->writeLine();
@@ -399,11 +398,11 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	protected function decodeJson(?string $json, string $what): ?array
 	{
-		if ($json === null || trim($json) === '') {
+		if ($json === null || \trim($json) === '') {
 			return [];
 		}
-		$decoded = json_decode($json, true);
-		if (!is_array($decoded)) {
+		$decoded = \json_decode($json, true);
+		if (!\is_array($decoded)) {
 			$this->getWriter()->writeError("The {$what} must be a JSON object; got: {$json}");
 			return null;
 		}
@@ -417,7 +416,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	protected function names(?string $list): array
 	{
-		return array_values(array_filter(array_map('trim', explode(',', (string) $list)), fn ($name) => $name !== ''));
+		return \array_values(\array_filter(\array_map('trim', \explode(',', (string) $list)), fn ($name) => $name !== ''));
 	}
 
 	/**
@@ -426,7 +425,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	protected function describeObject(mixed $object): string
 	{
-		return is_object($object) ? $object::class : '-';
+		return \is_object($object) ? $object::class : '-';
 	}
 
 	/**
@@ -443,7 +442,7 @@ class GAnalyticsShellAction extends TShellAction
 	public function setClientId($value): void
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_clientId = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_clientId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
 	/**
@@ -460,7 +459,7 @@ class GAnalyticsShellAction extends TShellAction
 	public function setUserId($value): void
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_userId = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_userId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
 	/**
@@ -477,7 +476,7 @@ class GAnalyticsShellAction extends TShellAction
 	public function setLimit($value): void
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_limit = ($value === null) ? null : max(1, TPropertyValue::ensureInteger($value));
+		$this->_limit = ($value === null) ? null : \max(1, TPropertyValue::ensureInteger($value));
 	}
 
 	/**
@@ -494,6 +493,6 @@ class GAnalyticsShellAction extends TShellAction
 	public function setProperty($value): void
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_property = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_property = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 }

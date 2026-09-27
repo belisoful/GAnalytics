@@ -86,8 +86,8 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 	 */
 	public function batchRunReports(array $requests): array
 	{
-		$response = $this->call('batchRunReports', ['requests' => array_values($requests)]);
-		return array_map(fn ($report) => new GAnalyticsReport((array) $report), (array) ($response['reports'] ?? []));
+		$response = $this->call('batchRunReports', ['requests' => \array_values($requests)]);
+		return \array_map(fn ($report) => new GAnalyticsReport((array) $report), (array) ($response['reports'] ?? []));
 	}
 
 	/**
@@ -109,8 +109,8 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 	 */
 	public function batchRunPivotReports(array $requests): array
 	{
-		$response = $this->call('batchRunPivotReports', ['requests' => array_values($requests)]);
-		return array_values((array) ($response['pivotReports'] ?? []));
+		$response = $this->call('batchRunPivotReports', ['requests' => \array_values($requests)]);
+		return \array_values((array) ($response['pivotReports'] ?? []));
 	}
 
 	/**
@@ -160,7 +160,7 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 	{
 		$request = ['dateRanges' => [['startDate' => $startDate, 'endDate' => $endDate]]];
 		$request += static::namedRequest($metrics, $dimensions);
-		return array_merge($request, $extra);
+		return \array_merge($request, $extra);
 	}
 
 	/**
@@ -172,7 +172,7 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 	 */
 	public static function realtimeRequest(array $metrics, array $dimensions = [], array $extra = []): array
 	{
-		return array_merge(static::namedRequest($metrics, $dimensions), $extra);
+		return \array_merge(static::namedRequest($metrics, $dimensions), $extra);
 	}
 
 	/**
@@ -183,9 +183,9 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 	 */
 	protected static function namedRequest(array $metrics, array $dimensions): array
 	{
-		$request = ['metrics' => array_map(fn ($name) => ['name' => (string) $name], array_values($metrics))];
-		if (count($dimensions) > 0) {
-			$request['dimensions'] = array_map(fn ($name) => ['name' => (string) $name], array_values($dimensions));
+		$request = ['metrics' => \array_map(fn ($name) => ['name' => (string) $name], \array_values($metrics))];
+		if (\count($dimensions) > 0) {
+			$request['dimensions'] = \array_map(fn ($name) => ['name' => (string) $name], \array_values($dimensions));
 		}
 		return $request;
 	}
@@ -233,11 +233,11 @@ class GAnalyticsDataApi extends GAnalyticsApiClient
 		if ($value === null) {
 			return null;
 		}
-		$id = trim((string) TPropertyValue::ensureString($value));
-		if (str_starts_with($id, 'properties/')) {
-			$id = substr($id, strlen('properties/'));
+		$id = \trim((string) TPropertyValue::ensureString($value));
+		if (\str_starts_with($id, 'properties/')) {
+			$id = \substr($id, \strlen('properties/'));
 		}
-		if (!preg_match('/^\d{1,20}$/', $id)) {
+		if (!\preg_match('/^\d{1,20}$/', $id)) {
 			throw new TInvalidDataValueException('ganalytics_property_invalid', $id);
 		}
 		return $id;

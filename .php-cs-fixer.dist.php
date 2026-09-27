@@ -36,6 +36,9 @@ $config
 		'type_declaration_spaces' => ['elements' => ['function', 'property']],
 		'method_chaining_indentation' => true,
 		'modernize_types_casting' => true,
+		// Fully qualified native calls compile to direct (frameless) calls; an unqualified one adds a
+		// namespace-fallback branch that never executes and shows as uncovered in path coverage.
+		'native_function_invocation' => ['include' => ['@all'], 'scope' => 'namespaced', 'strict' => true],
 		'no_alias_functions' => true,
 		'no_blank_lines_after_phpdoc' => true,
 		'no_null_property_initialization' => true,

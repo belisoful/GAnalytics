@@ -105,7 +105,7 @@ class GAnalyticsMeasurementProtocolTest extends TestCase
 	public function testSendRefusesMoreThanTwentyFiveEvents()
 	{
 		$this->expectException(TInvalidDataValueException::class);
-		$this->client()->send('1.2', array_fill(0, 26, ['name' => 'login']));
+		$this->client()->send('1.2', \array_fill(0, 26, ['name' => 'login']));
 	}
 
 	/** @return array<string, array{0: mixed}> */
@@ -115,7 +115,7 @@ class GAnalyticsMeasurementProtocolTest extends TestCase
 			'digit first' => ['1login'],
 			'dash' => ['sign-up'],
 			'space' => ['sign up'],
-			'too long' => [str_repeat('a', 41)],
+			'too long' => [\str_repeat('a', 41)],
 			'empty' => [''],
 			'not a string' => [42],
 			'missing' => [null],

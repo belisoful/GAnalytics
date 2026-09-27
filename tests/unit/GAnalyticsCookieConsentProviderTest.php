@@ -86,7 +86,7 @@ class GAnalyticsCookieConsentProviderTest extends TestCase
 		self::assertCount(1, $this->_response->sent);
 		$cookie = $this->_response->sent[0];
 		self::assertSame('ganalytics_consent', $cookie->getName());
-		self::assertSame(['ad_storage' => 'denied', 'analytics_storage' => 'granted'], json_decode($cookie->getValue(), true));
+		self::assertSame(['ad_storage' => 'denied', 'analytics_storage' => 'granted'], \json_decode($cookie->getValue(), true));
 		self::assertSame('/', $cookie->getPath());
 		self::assertSame(1_700_000_000 + 30 * 86400, $cookie->getExpire());
 		self::assertTrue($cookie->getHttpOnly());
@@ -106,6 +106,12 @@ class GAnalyticsCookieConsentProviderTest extends TestCase
 			self::fail('Expected an exception');
 		} catch (TInvalidDataValueException $e) {
 			self::assertCount(0, $this->_response->sent);
+		}
+		try {
+			$provider->setConsentState(['ad_storage' => ['granted']]);
+			self::fail('Expected an exception');
+		} catch (TInvalidDataValueException $e) {
+			self::assertStringContainsString('array', $e->getMessage(), 'A non-scalar value is named by its type.');
 		}
 		$this->expectException(TInvalidDataValueException::class);
 		$provider->setConsentState(['ad_storage' => 'yes']);

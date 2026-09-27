@@ -95,7 +95,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 		}
 		$cache = Prado::getApplication()?->getCache();
 		$cacheKey = $this->getCacheKey();
-		if ($cache !== null && ($cached = $cache->get($cacheKey)) !== false && is_array($cached)
+		if ($cache !== null && ($cached = $cache->get($cacheKey)) !== false && \is_array($cached)
 			&& isset($cached['token'], $cached['expires']) && $cached['expires'] - static::REFRESH_MARGIN > $now) {
 			$this->_token = (string) $cached['token'];
 			$this->_expires = (int) $cached['expires'];
@@ -103,7 +103,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 		}
 		[$this->_token, $this->_expires] = $this->requestToken($now);
 		if ($cache !== null) {
-			$cache->set($cacheKey, ['token' => $this->_token, 'expires' => $this->_expires], max(1, $this->_expires - $now));
+			$cache->set($cacheKey, ['token' => $this->_token, 'expires' => $this->_expires], \max(1, $this->_expires - $now));
 		}
 		return $this->_token;
 	}
@@ -117,14 +117,14 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	protected function requestToken(int $now): array
 	{
 		$key = $this->getKey();
-		$body = http_build_query([
+		$body = \http_build_query([
 			'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
 			'assertion' => $this->createAssertion($now),
 		]);
 		[$status, $response] = $this->transport('POST', $this->getTokenUri(), ['Content-Type: application/x-www-form-urlencoded'], $body, $this->getTimeout());
-		$data = is_string($response) ? json_decode($response, true) : null;
-		if ($status < 200 || $status >= 300 || !is_array($data) || !isset($data['access_token'])) {
-			throw new GAnalyticsApiException($status, is_array($data) ? $data : [], is_array($data) ? ($data['error_description'] ?? $data['error'] ?? null) : null);
+		$data = \is_string($response) ? \json_decode($response, true) : null;
+		if ($status < 200 || $status >= 300 || !\is_array($data) || !isset($data['access_token'])) {
+			throw new GAnalyticsApiException($status, \is_array($data) ? $data : [], \is_array($data) ? ($data['error_description'] ?? $data['error'] ?? null) : null);
 		}
 		$expiresIn = (int) ($data['expires_in'] ?? static::TOKEN_LIFETIME);
 		return [(string) $data['access_token'], $now + $expiresIn];
@@ -140,17 +140,17 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	public function createAssertion(int $now): string
 	{
 		$key = $this->getKey();
-		$header = static::base64UrlEncode(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
-		$claims = static::base64UrlEncode(json_encode([
+		$header = static::base64UrlEncode(\json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+		$claims = static::base64UrlEncode(\json_encode([
 			'iss' => $key['client_email'],
-			'scope' => implode(' ', $this->getScopes()),
+			'scope' => \implode(' ', $this->getScopes()),
 			'aud' => $this->getTokenUri(),
 			'iat' => $now,
 			'exp' => $now + static::TOKEN_LIFETIME,
 		]));
 		$input = $header . '.' . $claims;
-		$private = openssl_pkey_get_private((string) $key['private_key']);
-		if ($private === false || !openssl_sign($input, $signature, $private, OPENSSL_ALGO_SHA256)) {
+		$private = \openssl_pkey_get_private((string) $key['private_key']);
+		if ($private === false || !\openssl_sign($input, $signature, $private, OPENSSL_ALGO_SHA256)) {
 			throw new TInvalidDataValueException('ganalytics_credentials_key_invalid', (string) ($key['client_email'] ?? ''));
 		}
 		return $input . '.' . static::base64UrlEncode($signature);
@@ -163,7 +163,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	 */
 	public static function base64UrlEncode(string $data): string
 	{
-		return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+		return \rtrim(\strtr(\base64_encode($data), '+/', '-_'), '=');
 	}
 
 	/**
@@ -173,7 +173,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	 */
 	public static function base64UrlDecode(string $data): string
 	{
-		return (string) base64_decode(strtr($data, '-_', '+/') . str_repeat('=', (4 - strlen($data) % 4) % 4), true);
+		return (string) \base64_decode(\strtr($data, '-_', '+/') . \str_repeat('=', (4 - \strlen($data) % 4) % 4), true);
 	}
 
 	/**
@@ -200,7 +200,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	 */
 	protected function getCacheKey(): string
 	{
-		return static::CACHE_PREFIX . sha1(($this->_key['client_email'] ?? $this->_keyFile ?? '') . '|' . implode(' ', $this->getScopes()));
+		return static::CACHE_PREFIX . \sha1(($this->_key['client_email'] ?? $this->_keyFile ?? '') . '|' . \implode(' ', $this->getScopes()));
 	}
 
 	/**
@@ -215,7 +215,7 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 			if ($this->_keyFile === null) {
 				throw new TConfigurationException('ganalytics_credentials_unconfigured', static::class);
 			}
-			$json = @file_get_contents($this->_keyFile);
+			$json = @\file_get_contents($this->_keyFile);
 			if ($json === false) {
 				throw new TConfigurationException('ganalytics_credentials_keyfile_unreadable', $this->_keyFile);
 			}
@@ -236,9 +236,9 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 			$this->_key = null;
 			return;
 		}
-		$key = is_array($value) ? $value : json_decode(trim((string) TPropertyValue::ensureString($value)), true);
-		if (!is_array($key) || empty($key['client_email']) || empty($key['private_key'])) {
-			throw new TInvalidDataValueException('ganalytics_credentials_key_invalid', is_array($key) ? (string) ($key['client_email'] ?? '') : '');
+		$key = \is_array($value) ? $value : \json_decode(\trim((string) TPropertyValue::ensureString($value)), true);
+		if (!\is_array($key) || empty($key['client_email']) || empty($key['private_key'])) {
+			throw new TInvalidDataValueException('ganalytics_credentials_key_invalid', \is_array($key) ? (string) ($key['client_email'] ?? '') : '');
 		}
 		$this->_key = $key;
 		$this->forgetToken();
@@ -264,8 +264,8 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 			$this->_keyFile = null;
 			return;
 		}
-		$path = trim((string) TPropertyValue::ensureString($value));
-		if (!str_starts_with($path, '/') && !preg_match('/^[A-Za-z]:[\\\\\/]/', $path) && ($app = Prado::getApplication()) !== null) {
+		$path = \trim((string) TPropertyValue::ensureString($value));
+		if (!\str_starts_with($path, '/') && !\preg_match('/^[A-Za-z]:[\\\\\/]/', $path) && ($app = Prado::getApplication()) !== null) {
 			$path = $app->getBasePath() . DIRECTORY_SEPARATOR . $path;
 		}
 		$this->_keyFile = $path;
@@ -287,12 +287,12 @@ class GAnalyticsServiceAccountCredentials extends TComponent implements IGAnalyt
 	public function setScopes($value)
 	{
 		$scopes = [];
-		foreach (TPropertyValue::ensureArray(is_string($value) ? str_replace(' ', ',', $value) : $value, TPropertyValue::ARRAY_SKIP_EMPTY) as $scope) {
-			if (trim((string) $scope) !== '') {
-				$scopes[] = trim((string) $scope);
+		foreach (TPropertyValue::ensureArray(\is_string($value) ? \str_replace(' ', ',', $value) : $value, TPropertyValue::ARRAY_SKIP_EMPTY) as $scope) {
+			if (\trim((string) $scope) !== '') {
+				$scopes[] = \trim((string) $scope);
 			}
 		}
-		$this->_scopes = count($scopes) > 0 ? array_values(array_unique($scopes)) : [static::SCOPE_READONLY];
+		$this->_scopes = \count($scopes) > 0 ? \array_values(\array_unique($scopes)) : [static::SCOPE_READONLY];
 		$this->forgetToken();
 	}
 

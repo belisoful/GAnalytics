@@ -30,8 +30,8 @@ class GAnalyticsAdminApiTest extends TestCase
 	{
 		$api = $this->api();
 		$api->answers = [
-			[200, json_encode(['accountSummaries' => [['account' => 'accounts/1']], 'nextPageToken' => 'n'])],
-			[200, json_encode(['accountSummaries' => [['account' => 'accounts/2']]])],
+			[200, \json_encode(['accountSummaries' => [['account' => 'accounts/1']], 'nextPageToken' => 'n'])],
+			[200, \json_encode(['accountSummaries' => [['account' => 'accounts/2']]])],
 		];
 		self::assertSame([['account' => 'accounts/1'], ['account' => 'accounts/2']], $api->listAccountSummaries());
 		self::assertStringEndsWith('/accountSummaries?pageSize=200', $api->requests[0]['url']);
@@ -40,7 +40,7 @@ class GAnalyticsAdminApiTest extends TestCase
 
 		$api->answer(['properties' => [['name' => 'properties/5']]]);
 		self::assertSame([['name' => 'properties/5']], $api->listProperties('1'));
-		self::assertStringEndsWith('/properties?' . http_build_query(['filter' => 'parent:accounts/1', 'pageSize' => 200]), $api->requests[2]['url']);
+		self::assertStringEndsWith('/properties?' . \http_build_query(['filter' => 'parent:accounts/1', 'pageSize' => 200]), $api->requests[2]['url']);
 
 		$api->answer(['name' => 'properties/5', 'displayName' => 'Site']);
 		self::assertSame('Site', $api->getProperty('5')['displayName']);

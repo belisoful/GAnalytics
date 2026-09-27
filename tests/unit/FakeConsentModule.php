@@ -22,6 +22,6 @@ class FakeConsentModule extends TModule implements IGAnalyticsConsentStore
 	public function setConsentState(array $state): void
 	{
 		$this->updates[] = $state;
-		$this->state = array_merge($this->state, $state);
+		$this->state = \array_merge($this->state, $state);
 	}
 }

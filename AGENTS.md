@@ -6,9 +6,11 @@
 - **All Unit Tests**: `vendor/bin/phpunit --testsuite unit` (or `composer unittest`) - runs all unit tests
 - **Test Filter**: `vendor/bin/phpunit --testsuite unit --filter <test function, class, or directory>`
 - **Coverage**: `composer coverage` (text) / `composer coverage-html` (HTML in `build/coverage`); phpunit.xml declares `src/` as the coverage source and the scripts set `XDEBUG_MODE`. Narrow a run with `--filter` and `--coverage-filter`.
-- **Path (branch) coverage, filtered**: `composer coverage-paths` runs the unit suite with `--path-coverage`, the same branch list CI's `coverage` job reports. Over the whole suite Xdebug's path coverage takes very long (the order of an hour); over one class and its own test class it takes seconds and reproduces CI's branch list for that class exactly. Pass the filters after `--`:
-  `composer coverage-paths -- --filter GAnalyticsModuleTest --coverage-filter src/GAnalyticsModule.php`
-  Use this to find the uncovered branch CI names before adding the test for it; run the full script only when closing out.
+- **Coverage target**: 100% of lines and 100% of branches of `src/`, measured with Xdebug path coverage (CI's `coverage` job). Path coverage (every acyclic route through a function) is reported but not a target: a loop or a chain of conditions yields far more paths than tests can walk.
+- **Path (branch) coverage, filtered**: `composer coverage-branches` runs the unit suite with `--path-coverage`, writes `build/coverage/paths.php`, and lists every unexecuted branch per function (`tests/test_tools/coverage-branches.php`; exit code 1 while any remains; `--paths` lists paths too). Over the whole suite Xdebug's path coverage takes very long (the order of an hour); over one class and its own test class it takes seconds and reproduces CI's branch list for that class exactly. Pass the filters after `--`:
+  `composer coverage-branches -- --filter GAnalyticsModuleTest --coverage-filter src/GAnalyticsModule.php`
+  Use this to find the uncovered branch CI names before adding the test for it; run the full script only when closing out. `composer coverage-paths` is the same run with phpunit's text summary instead of the list.
+- **Native functions are fully qualified** (`\trim()`, `\in_array()`, …; php-cs-fixer's `native_function_invocation`, applied by `composer fix`). PHP 8.4 compiles an unqualified native call in namespaced code to a frameless call guarded by a namespace-fallback check; the fallback is a branch that never executes and shows as uncovered in path coverage. A qualified call compiles to the direct call with no branch.
 - **Live tests**: `composer livetest` (`vendor/bin/phpunit --testsuite live`) talks to a real GA4 property; every test skips without `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `GA4_PROPERTY_ID` and `GA4_SERVICE_ACCOUNT_JSON`. CI supplies them as repository secrets on pushes.
 - **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/` and `app-gtm/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
 
@@ -131,7 +133,7 @@ Docblocks inform and describe; it is not persuasive writing.
 - Logging goes through `Prado::log()` with `\Prado\Util\Log\TLogger` levels (the logger moved to `Prado\Util\Log` in PRADO 4.4).
 - The public API is published (v1.0.0 onward): prefer compatible changes, and document any breaking change under "Upgrading" in `CHANGELOG.md`
 - Record every user-visible change under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format) as it lands
-- A full check consists of the 4 checks (in order): `php -l` compile, php-cs-fixer, phpstan, phpunit (all checks must pass successfully)
+- A full check consists of the 4 checks (in order): `php -l` compile, php-cs-fixer, phpstan, phpunit (all checks must pass successfully); before a release, `composer coverage-branches` with no unexecuted branch and `npx playwright test --project=chromium`
 - A full check must be done for code to be ready for git commit.
 - The current version of this extension is **v1.0.0** (released 2026-09-26). It targets PRADO 4.4+ (the `pradosoft/prado` `master` branch, aliased `4.4.x-dev`). Release history and upgrade notes are in `CHANGELOG.md`.
 - This extension namespaces its class under `belisoful\GAnalytics` (PSR-4 → `src/`); extensions do NOT update the framework's `classes.php`. The Prado3 short class name is supplied via `config/classMap.json`, registered by Composer from `composer.json` `extra.prado.class-map`. The bootstrap module is `extra.prado.bootstrap`, so `<module id="belisoful/ganalytics"/>` configures it without a class.
@@ -152,7 +154,8 @@ Docblocks inform and describe; it is not persuasive writing.
 - Playwright specs (`tests/playwright/*.spec.js`) use `helpers.js`: `stubGoogle(page)` answers Google's hosts locally, `dataLayer(page)` and `gtagCalls(page)` read the page's data layer. A spec never depends on Google being reachable.
 - All new code must include unit tests
 - Unit test functions must comprehensively assert both typical and edge cases
-- Maximal coverage of code execution paths of a class is required
+- Every line and every branch of a class is covered (see Coverage target); a branch that cannot execute is removed from the code (a defensive check on a value PRADO types, a lazy-module fallback) rather than left uncovered
+- `GAnalyticsHttpTransportTest` runs the real transport against `LocalHttpServer` (PHP's built-in server on a loopback port with `tests/unit/app/echo-router.php`); it is the only unit test that opens a socket, and only to the machine itself
 - Test error conditions and exception handling
 - Use mock objects where appropriate; inject `TMockClock` instead of sleeping when a test depends on elapsed time
 - Tests should be isolated from each other (no shared state): remove the application parameters a test adds, restore the service and the application

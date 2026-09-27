@@ -80,6 +80,11 @@
 			"@putenv XDEBUG_MODE=coverage",
 			"vendor/bin/phpunit --testsuite unit --path-coverage --coverage-text"
 		],
+		"coverage-branches": [
+			"@putenv XDEBUG_MODE=coverage",
+			"vendor/bin/phpunit --testsuite unit --path-coverage --coverage-php build/coverage/paths.php",
+			"php tests/test_tools/coverage-branches.php"
+		],
 		"fulltest": [
 			"@fix",
 			"@stan",

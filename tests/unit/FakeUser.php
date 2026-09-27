@@ -48,12 +48,12 @@ class FakeUser extends \Prado\TComponent implements IUser
 
 	public function saveToString()
 	{
-		return serialize([$this->_name, $this->_isGuest]);
+		return \serialize([$this->_name, $this->_isGuest]);
 	}
 
 	public function loadFromString($string)
 	{
-		[$this->_name, $this->_isGuest] = unserialize($string);
+		[$this->_name, $this->_isGuest] = \unserialize($string);
 		return $this;
 	}
 }

@@ -14,19 +14,19 @@ trait RecordingTransportTrait
 	protected function transport(string $method, string $url, array $headers, ?string $body, float $timeout): array
 	{
 		$this->requests[] = ['method' => $method, 'url' => $url, 'headers' => $headers, 'body' => $body, 'timeout' => $timeout];
-		$answer = count($this->answers) > 1 ? array_shift($this->answers) : $this->answers[0];
+		$answer = \count($this->answers) > 1 ? \array_shift($this->answers) : $this->answers[0];
 		return $answer;
 	}
 
 	/** @return array<string, mixed> The decoded body of the last request. */
 	public function lastBody(): array
 	{
-		return json_decode((string) $this->requests[count($this->requests) - 1]['body'], true) ?? [];
+		return \json_decode((string) $this->requests[\count($this->requests) - 1]['body'], true) ?? [];
 	}
 
 	/** @param array<string, mixed> $response A JSON answer with status 200. */
 	public function answer(array $response, int $status = 200): void
 	{
-		$this->answers = [[$status, json_encode($response)]];
+		$this->answers = [[$status, \json_encode($response)]];
 	}
 }

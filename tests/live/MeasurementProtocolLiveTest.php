@@ -11,7 +11,7 @@ class MeasurementProtocolLiveTest extends LiveTestCase
 		$mp = $module->getMeasurementProtocol();
 		$mp->setDebug(true);
 		self::assertTrue($mp->send($mp->newClientId(), [['name' => 'live_test', 'params' => ['source' => 'phpunit', 'engagement_time_msec' => 1]]]));
-		$response = json_decode((string) $mp->getLastResponse(), true);
+		$response = \json_decode((string) $mp->getLastResponse(), true);
 		self::assertIsArray($response);
 		self::assertSame([], $response['validationMessages'] ?? null, 'Google reports no validation message for the event.');
 	}
@@ -21,8 +21,8 @@ class MeasurementProtocolLiveTest extends LiveTestCase
 		$module = $this->measurementModule();
 		$mp = $module->getMeasurementProtocol();
 		$mp->setDebug(true);
-		$mp->send($mp->newClientId(), [['name' => 'live_test', 'params' => ['too_many_params' => str_repeat('x', 101)]]]);
-		$response = json_decode((string) $mp->getLastResponse(), true);
+		$mp->send($mp->newClientId(), [['name' => 'live_test', 'params' => ['too_many_params' => \str_repeat('x', 101)]]]);
+		$response = \json_decode((string) $mp->getLastResponse(), true);
 		self::assertNotEmpty($response['validationMessages'] ?? [], 'A 101-character value exceeds the parameter limit.');
 	}
 

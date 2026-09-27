@@ -73,9 +73,9 @@ abstract class GAnalyticsApiClient extends TComponent
 		if ($credentials === null) {
 			throw new TConfigurationException('ganalytics_credentials_unconfigured', static::class);
 		}
-		$url = $this->getBaseUrl() . '/' . ltrim($path, '/');
-		if (count($query) > 0) {
-			$url .= '?' . http_build_query($query);
+		$url = $this->getBaseUrl() . '/' . \ltrim($path, '/');
+		if (\count($query) > 0) {
+			$url .= '?' . \http_build_query($query);
 		}
 		$headers = [
 			'Authorization: Bearer ' . $credentials->getAccessToken(),
@@ -84,17 +84,17 @@ abstract class GAnalyticsApiClient extends TComponent
 		$json = null;
 		if ($body !== null) {
 			$headers[] = 'Content-Type: application/json';
-			$json = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			$json = \json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 			if ($json === false) {
-				throw new TInvalidDataValueException('ganalytics_payload_unencodable', json_last_error_msg());
+				throw new TInvalidDataValueException('ganalytics_payload_unencodable', \json_last_error_msg());
 			}
 		}
 		[$status, $response] = $this->transport($method, $url, $headers, $json, $this->getTimeout());
-		$data = ($response === null || trim($response) === '') ? [] : json_decode($response, true);
+		$data = ($response === null || \trim($response) === '') ? [] : \json_decode($response, true);
 		if ($status < 200 || $status >= 300) {
-			throw new GAnalyticsApiException($status, is_array($data) ? $data : []);
+			throw new GAnalyticsApiException($status, \is_array($data) ? $data : []);
 		}
-		if (!is_array($data)) {
+		if (!\is_array($data)) {
 			throw new GAnalyticsApiException($status, [], 'the response is not JSON');
 		}
 		$this->_lastResponse = $data;
@@ -119,7 +119,7 @@ abstract class GAnalyticsApiClient extends TComponent
 			}
 			$token = $page['nextPageToken'] ?? null;
 			$query['pageToken'] = $token;
-		} while (is_string($token) && $token !== '');
+		} while (\is_string($token) && $token !== '');
 		return $items;
 	}
 
@@ -150,9 +150,9 @@ abstract class GAnalyticsApiClient extends TComponent
 			$this->_baseUrl = static::getDefaultBaseUrl();
 			return;
 		}
-		$url = rtrim(trim((string) TPropertyValue::ensureString($value)), '/');
-		$scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-		if (!in_array($scheme, ['http', 'https'], true) || filter_var($url, FILTER_VALIDATE_URL) === false || str_contains($url, '?') || str_contains($url, '#')) {
+		$url = \rtrim(\trim((string) TPropertyValue::ensureString($value)), '/');
+		$scheme = \strtolower((string) \parse_url($url, PHP_URL_SCHEME));
+		if (!\in_array($scheme, ['http', 'https'], true) || \filter_var($url, FILTER_VALIDATE_URL) === false || \str_contains($url, '?') || \str_contains($url, '#')) {
 			throw new TInvalidDataValueException('ganalytics_tagurl_invalid', $url);
 		}
 		$this->_baseUrl = $url;

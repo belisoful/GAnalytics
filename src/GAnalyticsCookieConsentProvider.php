@@ -15,8 +15,6 @@ use Prado\TModule;
 use Prado\TPropertyValue;
 use Prado\Util\Clock\TApplicationClockAwareTrait;
 use Prado\Web\THttpCookie;
-use Prado\Web\THttpRequest;
-use Prado\Web\THttpResponse;
 
 /**
  * GAnalyticsCookieConsentProvider class.
@@ -65,14 +63,8 @@ class GAnalyticsCookieConsentProvider extends TModule implements IGAnalyticsCons
 	public function getConsentState(): array
 	{
 		if ($this->_state === null) {
-			$this->_state = [];
-			$request = $this->getApplication()->getRequest();
-			if ($request instanceof THttpRequest) {
-				$cookie = $request->getCookies()->findCookieByName($this->getCookieName());
-				if ($cookie !== null) {
-					$this->_state = static::normalizeState(json_decode((string) $cookie->getValue(), true));
-				}
-			}
+			$cookie = $this->getApplication()->getRequest()->getCookies()->findCookieByName($this->getCookieName());
+			$this->_state = $cookie === null ? [] : static::normalizeState(\json_decode((string) $cookie->getValue(), true));
 		}
 		return $this->_state;
 	}
@@ -85,11 +77,8 @@ class GAnalyticsCookieConsentProvider extends TModule implements IGAnalyticsCons
 	public function setConsentState(array $state): void
 	{
 		$state = static::normalizeState($state, true);
-		$this->_state = array_merge($this->getConsentState(), $state);
-		$response = $this->getApplication()->getResponse();
-		if ($response instanceof THttpResponse) {
-			$response->getCookies()->add($this->createCookie($this->_state));
-		}
+		$this->_state = \array_merge($this->getConsentState(), $state);
+		$this->getApplication()->getResponse()->getCookies()->add($this->createCookie($this->_state));
 	}
 
 	/**
@@ -99,13 +88,12 @@ class GAnalyticsCookieConsentProvider extends TModule implements IGAnalyticsCons
 	 */
 	public function createCookie(array $state): THttpCookie
 	{
-		$cookie = new THttpCookie($this->getCookieName(), json_encode($state, JSON_UNESCAPED_SLASHES));
+		$cookie = new THttpCookie($this->getCookieName(), \json_encode($state, JSON_UNESCAPED_SLASHES));
 		$cookie->setPath('/');
 		$cookie->setExpire($this->getClock()->time() + $this->getExpires() * 86400);
 		$cookie->setHttpOnly(true);
 		$cookie->setSameSite(\Prado\Web\THttpCookieSameSite::Lax);
-		$request = $this->getApplication()->getRequest();
-		$cookie->setSecure($request instanceof THttpRequest && $request->getIsSecureConnection());
+		$cookie->setSecure($this->getApplication()->getRequest()->getIsSecureConnection());
 		return $cookie;
 	}
 
@@ -119,14 +107,14 @@ class GAnalyticsCookieConsentProvider extends TModule implements IGAnalyticsCons
 	public static function normalizeState(mixed $state, bool $strict = false): array
 	{
 		$result = [];
-		foreach (is_array($state) ? $state : [] as $type => $value) {
-			$value = is_string($value) ? strtolower(trim($value)) : $value;
-			$known = in_array($type, static::CONSENT_TYPES, true);
-			$valid = in_array($value, ['granted', 'denied'], true);
+		foreach (\is_array($state) ? $state : [] as $type => $value) {
+			$value = \is_string($value) ? \strtolower(\trim($value)) : $value;
+			$known = \in_array($type, static::CONSENT_TYPES, true);
+			$valid = \in_array($value, ['granted', 'denied'], true);
 			if ($known && $valid) {
 				$result[$type] = $value;
 			} elseif ($strict) {
-				throw new TInvalidDataValueException('ganalytics_consent_invalid', (string) $type, is_scalar($value) ? (string) $value : get_debug_type($value));
+				throw new TInvalidDataValueException('ganalytics_consent_invalid', (string) $type, \is_scalar($value) ? (string) $value : \get_debug_type($value));
 			}
 		}
 		return $result;
@@ -147,8 +135,8 @@ class GAnalyticsCookieConsentProvider extends TModule implements IGAnalyticsCons
 	public function setCookieName($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$name = ($value === null) ? static::DEFAULT_COOKIE_NAME : trim((string) TPropertyValue::ensureString($value));
-		if (!preg_match('/^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$/', $name)) {
+		$name = ($value === null) ? static::DEFAULT_COOKIE_NAME : \trim((string) TPropertyValue::ensureString($value));
+		if (!\preg_match('/^[A-Za-z0-9!#$%&\'*+.^_`|~-]+$/', $name)) {
 			throw new TInvalidDataValueException('ganalytics_cookiename_invalid', $name);
 		}
 		$this->_cookieName = $name;

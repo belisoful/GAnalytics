@@ -25,6 +25,6 @@ class RecordingMeasurementProtocol extends GAnalyticsMeasurementProtocol
 	/** @return array<string, mixed> The decoded body of the last request. */
 	public function lastPayload(): array
 	{
-		return json_decode($this->posts[count($this->posts) - 1]['body'], true);
+		return \json_decode($this->posts[\count($this->posts) - 1]['body'], true);
 	}
 }

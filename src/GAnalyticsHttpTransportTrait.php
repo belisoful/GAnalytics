@@ -36,19 +36,20 @@ trait GAnalyticsHttpTransportTrait
 	{
 		$options = [
 			'method' => $method,
-			'header' => implode("\r\n", $headers) . "\r\n",
+			'header' => \implode("\r\n", $headers) . "\r\n",
 			'timeout' => $timeout,
 			'ignore_errors' => true,
 		];
 		if ($body !== null) {
 			$options['content'] = $body;
 		}
-		$response = @file_get_contents($url, false, stream_context_create(['http' => $options]));
+		// PHP assigns $http_response_header in this scope when the http wrapper received a response;
+		// the variable must exist in the scope for that, and stays empty on a transport failure.
+		$http_response_header = [];
+		$response = @\file_get_contents($url, false, \stream_context_create(['http' => $options]));
 		$status = 0;
-		// PHP defines $http_response_header only when the http wrapper received a response.
-		$responseHeaders = get_defined_vars()['http_response_header'] ?? [];
-		foreach ($responseHeaders as $header) {
-			if (preg_match('~^HTTP/\S+\s+(\d{3})~', $header, $match)) {
+		foreach ($http_response_header as $header) {
+			if (\preg_match('~^HTTP/\S+\s+(\d{3})~', $header, $match)) {
 				$status = (int) $match[1];
 			}
 		}

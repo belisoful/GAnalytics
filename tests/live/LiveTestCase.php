@@ -28,11 +28,11 @@ abstract class LiveTestCase extends TestCase
 	 */
 	protected function env(string $name): string
 	{
-		$value = getenv($name);
-		if ($value === false || trim($value) === '') {
+		$value = \getenv($name);
+		if ($value === false || \trim($value) === '') {
 			self::markTestSkipped("{$name} is not set; the live test needs a Google Analytics property.");
 		}
-		return trim($value);
+		return \trim($value);
 	}
 
 	/**
@@ -57,7 +57,7 @@ abstract class LiveTestCase extends TestCase
 	{
 		$json = $this->env('GA4_SERVICE_ACCOUNT_JSON');
 		$credentials = new GAnalyticsServiceAccountCredentials();
-		if (str_starts_with(trim($json), '{')) {
+		if (\str_starts_with(\trim($json), '{')) {
 			$credentials->setKey($json);
 		} else {
 			$credentials->setKeyFile($json);

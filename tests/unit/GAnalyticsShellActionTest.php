@@ -10,6 +10,7 @@ use Prado\IO\TTextWriter;
 use Prado\Prado;
 use Prado\Shell\TShellAction;
 use Prado\Shell\TShellWriter;
+use Prado\TApplicationMode;
 use Prado\TComponent;
 use Prado\Web\UI\TPage;
 
@@ -114,6 +115,48 @@ class GAnalyticsShellActionTest extends TestCase
 		self::assertStringContainsString('gtm.start', $out);
 	}
 
+	public function testStatusShowsTheOtherSideOfEverySetting()
+	{
+		$module = $this->module();
+		$module->setEnabled(false);
+		$module->setAdditionalMeasurementIds('AW-123456789');
+		$module->setEnabledModes('Normal');
+		$module->setUserId('customer-1');
+		$module->setAttachPageBehavior(true);
+		$module->setAmendCsp(true);
+		$module->setApiSecret(null);
+		$module->setTrackExceptions(true);
+		$action = $this->action($module);
+		$action->actionStatus([]);
+		$out = $this->printed();
+		self::assertStringContainsString('no (Enabled=false, mode', $out);
+		self::assertStringContainsString('AW-123456789', $out);
+		self::assertStringContainsString('Enabled modes     Normal', $out);
+		self::assertStringContainsString('User id           customer-1', $out);
+		self::assertStringContainsString('exceptions', $out);
+		self::assertStringContainsString('attached', $out);
+		self::assertStringContainsString('Amend CSP         yes', $out);
+		self::assertStringContainsString('API secret        -', $out);
+
+		$module->setUserIdFromUser(true);
+		$module->setUserId(null);
+		$action = $this->action($module);
+		$action->actionStatus([]);
+		self::assertStringContainsString('from the application user', $this->printed());
+
+		$module->setEnabled(true);
+		$app = Prado::getApplication();
+		$mode = (string) $app->getMode();
+		$app->setMode(TApplicationMode::Debug);
+		try {
+			$action = $this->action($module);
+			$action->actionStatus([]);
+			self::assertStringContainsString('no (Enabled=true, mode Debug)', $this->printed(), 'Inactive because of the mode.');
+		} finally {
+			$app->setMode($mode);
+		}
+	}
+
 	public function testStatusDescribesAParameterIdAndAMissingOne()
 	{
 		$app = Prado::getApplication();
@@ -154,7 +197,7 @@ class GAnalyticsShellActionTest extends TestCase
 	{
 		$app = Prado::getApplication();
 		$module = $this->module();
-		$app->setModule('ganalytics-' . uniqid(), $module);
+		$app->setModule('ganalytics-' . \uniqid(), $module);
 		$this->_out = new TTextWriter();
 		$writer = new TShellWriter($this->_out);
 		$action = new GAnalyticsShellAction();
@@ -206,6 +249,11 @@ class GAnalyticsShellActionTest extends TestCase
 		$action->actionSend(['ganalytics/send', 'login', 'not json']);
 		self::assertStringContainsString('must be a JSON object', $this->printed());
 		self::assertCount(0, $module->protocol->posts);
+
+		$action = $this->action($module);
+		$action->actionSend(['ganalytics/send', 'login', '  ']);
+		self::assertStringContainsString('accepted', $this->printed(), 'Blank params are no params.');
+		self::assertArrayNotHasKey('params', $module->protocol->lastPayload()['events'][0]);
 
 		$action = $this->action($module);
 		$action->actionSend(['ganalytics/send', 'bad-name']);
@@ -273,8 +321,8 @@ class GAnalyticsShellActionTest extends TestCase
 	{
 		$module = $this->module();
 		$module->adminApi->answers = [
-			[200, json_encode(['accountSummaries' => [['account' => 'accounts/1', 'displayName' => 'Acme', 'propertySummaries' => [['property' => 'properties/123', 'displayName' => 'Site']]]]])],
-			[200, json_encode(['dataStreams' => [['name' => 'properties/123/dataStreams/7', 'type' => 'WEB_DATA_STREAM', 'webStreamData' => ['measurementId' => 'G-ABC']]]])],
+			[200, \json_encode(['accountSummaries' => [['account' => 'accounts/1', 'displayName' => 'Acme', 'propertySummaries' => [['property' => 'properties/123', 'displayName' => 'Site']]]]])],
+			[200, \json_encode(['dataStreams' => [['name' => 'properties/123/dataStreams/7', 'type' => 'WEB_DATA_STREAM', 'webStreamData' => ['measurementId' => 'G-ABC']]]])],
 		];
 		$action = $this->action($module);
 		self::assertTrue($action->actionProperties(['ganalytics/properties']));
@@ -290,7 +338,7 @@ class GAnalyticsShellActionTest extends TestCase
 		$out = $this->printed();
 		self::assertStringContainsString('properties/9', $out);
 		self::assertStringContainsString('IOS_APP_DATA_STREAM', $out);
-		self::assertStringEndsWith('/properties/9/dataStreams?pageSize=200', $module->adminApi->requests[count($module->adminApi->requests) - 1]['url']);
+		self::assertStringEndsWith('/properties/9/dataStreams?pageSize=200', $module->adminApi->requests[\count($module->adminApi->requests) - 1]['url']);
 
 		$module->adminApi->answer(['error' => ['message' => 'nope']], 403);
 		$action = $this->action($module);

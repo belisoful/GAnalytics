@@ -33,14 +33,15 @@ use Prado\Util\Log\TLogger;
  * {@see setDebug() Debug} the request goes to the validation endpoint, which accepts nothing and
  * answers with validation messages; the messages are logged at {@see TLogger::WARNING}.
  *
- * The transport is {@see post()}, a `file_get_contents()` over an `http` stream context with
- * {@see getTimeout() Timeout}; a subclass supplies another transport by overriding it.
+ * The transport is {@see post()}, the extension's {@see GAnalyticsHttpTransportTrait::transport()}
+ * with {@see getTimeout() Timeout}; a subclass supplies another transport by overriding it.
  *
  * @author Brad Anderson <belisoful@icloud.com>
  */
 class GAnalyticsMeasurementProtocol extends TComponent
 {
 	use TApplicationClockAwareTrait;
+	use GAnalyticsHttpTransportTrait;
 
 	/** The Measurement Protocol collection endpoint. */
 	public const DEFAULT_ENDPOINT = 'https://www.google-analytics.com/mp/collect';
@@ -87,43 +88,43 @@ class GAnalyticsMeasurementProtocol extends TComponent
 		if ($this->getMeasurementId() === null || $this->getApiSecret() === null) {
 			throw new TConfigurationException('ganalytics_measurement_protocol_unconfigured');
 		}
-		if (trim($clientId) === '') {
+		if (\trim($clientId) === '') {
 			throw new TInvalidDataValueException('ganalytics_clientid_invalid', $clientId);
 		}
-		if (count($events) === 0 || count($events) > static::MAX_EVENTS) {
-			throw new TInvalidDataValueException('ganalytics_events_count_invalid', (string) count($events), (string) static::MAX_EVENTS);
+		if (\count($events) === 0 || \count($events) > static::MAX_EVENTS) {
+			throw new TInvalidDataValueException('ganalytics_events_count_invalid', (string) \count($events), (string) static::MAX_EVENTS);
 		}
 		$payload = $extra;
 		$payload['client_id'] = $clientId;
 		if ($userId !== null && $userId !== '') {
 			$payload['user_id'] = $userId;
 		}
-		$payload['timestamp_micros'] = (int) round($this->getClock()->microtime() * 1_000_000);
+		$payload['timestamp_micros'] = (int) \round($this->getClock()->microtime() * 1_000_000);
 		$payload['events'] = [];
 		foreach ($events as $event) {
 			$name = $event['name'] ?? null;
-			if (!is_string($name) || !GAnalyticsModule::isEventName($name)) {
-				throw new TInvalidDataValueException('ganalytics_event_name_invalid', is_scalar($name) ? (string) $name : get_debug_type($name));
+			if (!\is_string($name) || !GAnalyticsModule::isEventName($name)) {
+				throw new TInvalidDataValueException('ganalytics_event_name_invalid', \is_scalar($name) ? (string) $name : \get_debug_type($name));
 			}
 			$entry = ['name' => $name];
-			if (!empty($event['params']) && is_array($event['params'])) {
+			if (!empty($event['params']) && \is_array($event['params'])) {
 				$entry['params'] = $event['params'];
 			}
 			$payload['events'][] = $entry;
 		}
 		$url = ($this->getDebug() ? $this->getDebugEndpoint() : $this->getEndpoint())
-			. '?measurement_id=' . rawurlencode($this->getMeasurementId())
-			. '&api_secret=' . rawurlencode($this->getApiSecret());
-		$body = json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+			. '?measurement_id=' . \rawurlencode($this->getMeasurementId())
+			. '&api_secret=' . \rawurlencode($this->getApiSecret());
+		$body = \json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 		if ($body === false) {
-			throw new TInvalidDataValueException('ganalytics_payload_unencodable', json_last_error_msg());
+			throw new TInvalidDataValueException('ganalytics_payload_unencodable', \json_last_error_msg());
 		}
 		[$status, $response] = $this->post($url, $body);
 		$this->_lastResponse = $response;
-		if ($this->getDebug() && is_string($response) && $response !== '') {
-			$messages = json_decode($response, true);
+		if ($this->getDebug() && \is_string($response) && $response !== '') {
+			$messages = \json_decode($response, true);
 			foreach ((array) ($messages['validationMessages'] ?? []) as $message) {
-				Prado::log('Measurement Protocol validation: ' . json_encode($message, JSON_UNESCAPED_SLASHES), TLogger::WARNING, static::class);
+				Prado::log('Measurement Protocol validation: ' . \json_encode($message, JSON_UNESCAPED_SLASHES), TLogger::WARNING, static::class);
 			}
 		}
 		if ($status < 200 || $status >= 300) {
@@ -134,32 +135,15 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	}
 
 	/**
-	 * Posts a JSON body and returns the HTTP status and the response body. The transport seam:
-	 * a `file_get_contents()` over an `http` stream context with {@see getTimeout() Timeout}. A
-	 * transport failure is status 0.
+	 * Posts a JSON body and returns the HTTP status and the response body: the transport seam of
+	 * the client, {@see transport()} with {@see getTimeout() Timeout}. A transport failure is status 0.
 	 * @param string $url The request URL.
 	 * @param string $body The JSON request body.
 	 * @return array{0: int, 1: ?string} The HTTP status code and the response body.
 	 */
 	protected function post(string $url, string $body): array
 	{
-		$context = stream_context_create(['http' => [
-			'method' => 'POST',
-			'header' => "Content-Type: application/json\r\n",
-			'content' => $body,
-			'timeout' => $this->getTimeout(),
-			'ignore_errors' => true,
-		]]);
-		$response = @file_get_contents($url, false, $context);
-		$status = 0;
-		// PHP defines $http_response_header only when the http wrapper received a response.
-		$headers = get_defined_vars()['http_response_header'] ?? [];
-		foreach ($headers as $header) {
-			if (preg_match('~^HTTP/\S+\s+(\d{3})~', $header, $match)) {
-				$status = (int) $match[1];
-			}
-		}
-		return [$status, $response === false ? null : $response];
+		return $this->transport('POST', $url, ['Content-Type: application/json'], $body, $this->getTimeout());
 	}
 
 	/**
@@ -169,7 +153,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	 */
 	public function newClientId(): string
 	{
-		return random_int(1_000_000_000, 4_294_967_295) . '.' . $this->getClock()->time();
+		return \random_int(1_000_000_000, 4_294_967_295) . '.' . $this->getClock()->time();
 	}
 
 	/**
@@ -179,7 +163,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	 */
 	public static function clientIdFromCookie(?string $cookie): ?string
 	{
-		if ($cookie === null || !preg_match('/^GA1\.\d+\.(\d+\.\d+)$/', trim($cookie), $match)) {
+		if ($cookie === null || !\preg_match('/^GA1\.\d+\.(\d+\.\d+)$/', \trim($cookie), $match)) {
 			return null;
 		}
 		return $match[1];
@@ -207,7 +191,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	public function setMeasurementId($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_measurementId = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_measurementId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
 	/**
@@ -224,7 +208,7 @@ class GAnalyticsMeasurementProtocol extends TComponent
 	public function setApiSecret($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_apiSecret = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_apiSecret = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
 	/**
@@ -274,9 +258,9 @@ class GAnalyticsMeasurementProtocol extends TComponent
 		if ($value === null) {
 			return $default;
 		}
-		$url = trim((string) TPropertyValue::ensureString($value));
-		$scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-		if (!in_array($scheme, ['http', 'https'], true) || filter_var($url, FILTER_VALIDATE_URL) === false || str_contains($url, '?') || str_contains($url, '#')) {
+		$url = \trim((string) TPropertyValue::ensureString($value));
+		$scheme = \strtolower((string) \parse_url($url, PHP_URL_SCHEME));
+		if (!\in_array($scheme, ['http', 'https'], true) || \filter_var($url, FILTER_VALIDATE_URL) === false || \str_contains($url, '?') || \str_contains($url, '#')) {
 			throw new TInvalidDataValueException('ganalytics_tagurl_invalid', $url);
 		}
 		return $url;

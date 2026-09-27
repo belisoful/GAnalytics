@@ -20,9 +20,9 @@ class GAnalyticsCredentialsTest extends TestCase
 
 	public static function setUpBeforeClass(): void
 	{
-		$resource = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
-		openssl_pkey_export($resource, $private);
-		self::$pair = ['private' => $private, 'public' => openssl_pkey_get_details($resource)['key']];
+		$resource = \openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+		\openssl_pkey_export($resource, $private);
+		self::$pair = ['private' => $private, 'public' => \openssl_pkey_get_details($resource)['key']];
 	}
 
 	protected function tearDown(): void
@@ -61,6 +61,7 @@ class GAnalyticsCredentialsTest extends TestCase
 	public function testDefaults()
 	{
 		$credentials = new GAnalyticsServiceAccountCredentials();
+		$credentials->clearToken();
 		self::assertNull($credentials->getKeyFile());
 		self::assertSame([GAnalyticsServiceAccountCredentials::SCOPE_READONLY], $credentials->getScopes());
 		self::assertSame(GAnalyticsServiceAccountCredentials::DEFAULT_TOKEN_URI, $credentials->getTokenUri());
@@ -74,16 +75,16 @@ class GAnalyticsCredentialsTest extends TestCase
 		$credentials = $this->credentials();
 		$credentials->setScopes([GAnalyticsServiceAccountCredentials::SCOPE_READONLY, GAnalyticsServiceAccountCredentials::SCOPE_EDIT]);
 		$jwt = $credentials->createAssertion(1_700_000_000);
-		[$header, $claims, $signature] = explode('.', $jwt);
-		self::assertSame(['alg' => 'RS256', 'typ' => 'JWT'], json_decode(GAnalyticsServiceAccountCredentials::base64UrlDecode($header), true));
+		[$header, $claims, $signature] = \explode('.', $jwt);
+		self::assertSame(['alg' => 'RS256', 'typ' => 'JWT'], \json_decode(GAnalyticsServiceAccountCredentials::base64UrlDecode($header), true));
 		self::assertSame([
 			'iss' => 'bot@project.iam.gserviceaccount.com',
 			'scope' => GAnalyticsServiceAccountCredentials::SCOPE_READONLY . ' ' . GAnalyticsServiceAccountCredentials::SCOPE_EDIT,
 			'aud' => 'https://oauth2.googleapis.com/token',
 			'iat' => 1_700_000_000,
 			'exp' => 1_700_003_600,
-		], json_decode(GAnalyticsServiceAccountCredentials::base64UrlDecode($claims), true));
-		self::assertSame(1, openssl_verify($header . '.' . $claims, GAnalyticsServiceAccountCredentials::base64UrlDecode($signature), self::$pair['public'], OPENSSL_ALGO_SHA256), 'The signature verifies with the public key.');
+		], \json_decode(GAnalyticsServiceAccountCredentials::base64UrlDecode($claims), true));
+		self::assertSame(1, \openssl_verify($header . '.' . $claims, GAnalyticsServiceAccountCredentials::base64UrlDecode($signature), self::$pair['public'], OPENSSL_ALGO_SHA256), 'The signature verifies with the public key.');
 		self::assertStringNotContainsString('=', $jwt);
 		self::assertStringNotContainsString('+', $jwt);
 	}
@@ -105,9 +106,9 @@ class GAnalyticsCredentialsTest extends TestCase
 		self::assertSame('POST', $sent['method']);
 		self::assertSame('https://oauth2.googleapis.com/token', $sent['url']);
 		self::assertContains('Content-Type: application/x-www-form-urlencoded', $sent['headers']);
-		parse_str((string) $sent['body'], $form);
+		\parse_str((string) $sent['body'], $form);
 		self::assertSame('urn:ietf:params:oauth:grant-type:jwt-bearer', $form['grant_type']);
-		self::assertSame(3, count(explode('.', $form['assertion'])));
+		self::assertSame(3, \count(\explode('.', $form['assertion'])));
 
 		$credentials->answer(['access_token' => 'ya29.second', 'expires_in' => 3599]);
 		self::assertSame('ya29.first', $credentials->getAccessToken(), 'The token is reused until it nears expiry.');
@@ -174,7 +175,7 @@ class GAnalyticsCredentialsTest extends TestCase
 	public function testKeyValidation()
 	{
 		$credentials = new GAnalyticsServiceAccountCredentials();
-		$credentials->setKey(json_encode($this->key()));
+		$credentials->setKey(\json_encode($this->key()));
 		self::assertSame('bot@project.iam.gserviceaccount.com', $credentials->getKey()['client_email']);
 		$credentials->setKey('');
 		try {
@@ -198,10 +199,10 @@ class GAnalyticsCredentialsTest extends TestCase
 
 	public function testKeyFileIsReadOnFirstUse()
 	{
-		$dir = sys_get_temp_dir() . '/ganalytics-' . uniqid();
-		mkdir($dir);
+		$dir = \sys_get_temp_dir() . '/ganalytics-' . \uniqid();
+		\mkdir($dir);
 		$file = $dir . '/key.json';
-		file_put_contents($file, json_encode($this->key()));
+		\file_put_contents($file, \json_encode($this->key()));
 		try {
 			$credentials = new GAnalyticsServiceAccountCredentials();
 			$credentials->setKeyFile($file);
@@ -212,11 +213,22 @@ class GAnalyticsCredentialsTest extends TestCase
 
 			$credentials->setKeyFile('relative/key.json');
 			self::assertSame(Prado::getApplication()->getBasePath() . DIRECTORY_SEPARATOR . 'relative/key.json', $credentials->getKeyFile(), 'A relative path is under the application.');
+			$credentials->setKeyFile('C:\\keys\\service.json');
+			self::assertSame('C:\\keys\\service.json', $credentials->getKeyFile(), 'A Windows path is absolute.');
+			$app = Prado::getApplication();
+			Prado::setApplication(null);
+			try {
+				$credentials->setKeyFile('relative/key.json');
+				self::assertSame('relative/key.json', $credentials->getKeyFile(), 'Without an application a relative path stays relative.');
+			} finally {
+				Prado::setApplication($app);
+			}
+			$credentials->setKeyFile('relative/key.json');
 			$this->expectException(TConfigurationException::class);
 			$credentials->getKey();
 		} finally {
-			unlink($file);
-			rmdir($dir);
+			\unlink($file);
+			\rmdir($dir);
 		}
 	}
 

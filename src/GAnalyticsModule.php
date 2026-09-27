@@ -30,8 +30,6 @@ use Prado\Web\HttpHeaders\THttpHeaderCsp;
 use Prado\Web\HttpHeaders\THttpHeadersManager;
 use Prado\Web\Javascripts\TJavaScript;
 use Prado\Web\Services\TPageService;
-use Prado\Web\THttpRequest;
-use Prado\Web\THttpSession;
 use Prado\Web\UI\TPage;
 use Prado\Web\UI\WebControls\TLiteral;
 use Prado\Xml\TXmlElement;
@@ -322,11 +320,11 @@ class GAnalyticsModule extends TPluginModule
 			foreach ($config->getElementsByTagName('consent') as $element) {
 				$this->setConsentProvider($element->getAttributes()->toArray());
 			}
-		} elseif (is_array($config)) {
-			if (isset($config['credentials']) && is_array($config['credentials'])) {
+		} elseif (\is_array($config)) {
+			if (isset($config['credentials']) && \is_array($config['credentials'])) {
 				$this->setCredentials($config['credentials']);
 			}
-			if (isset($config['consent']) && is_array($config['consent'])) {
+			if (isset($config['consent']) && \is_array($config['consent'])) {
 				$this->setConsentProvider($config['consent']);
 			}
 		}
@@ -389,11 +387,10 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$app = $this->getApplication();
 		$managers = [];
-		foreach ($app->getModulesByType(TAuthManager::class) as $id => $manager) {
-			$manager ??= $app->getModule($id);
-			if ($manager instanceof TAuthManager) {
-				$managers[$id] = $manager;
-			}
+		foreach (\array_keys($app->getModulesByType(TAuthManager::class)) as $id) {
+			$manager = $app->getModule($id);   // loads a lazy module; returns a loaded one as is
+			\assert($manager instanceof TAuthManager);
+			$managers[$id] = $manager;
 		}
 		return $managers;
 	}
@@ -453,9 +450,9 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$type = (new \ReflectionClass($exception))->getShortName();
 		$params = [
-			'description' => mb_substr($type . ': ' . $exception->getMessage(), 0, static::PARAM_MAX_LENGTH),
+			'description' => \mb_substr($type . ': ' . $exception->getMessage(), 0, static::PARAM_MAX_LENGTH),
 			'fatal' => true,
-			'error_type' => mb_substr($type, 0, static::PARAM_MAX_LENGTH),
+			'error_type' => \mb_substr($type, 0, static::PARAM_MAX_LENGTH),
 		];
 		if ($exception instanceof THttpException) {
 			$params['status_code'] = (int) $exception->getStatusCode();
@@ -516,13 +513,13 @@ class GAnalyticsModule extends TPluginModule
 				$failed[] = (string) $validator->getID();
 			}
 		}
-		if (count($failed) === 0) {
+		if (\count($failed) === 0) {
 			return false;
 		}
 		$this->queueCall(['event', 'form_error', [
 			'form_id' => (string) $page->getPagePath(),
-			'error_count' => count($failed),
-			'validators' => mb_substr(implode(',', $failed), 0, static::PARAM_MAX_LENGTH),
+			'error_count' => \count($failed),
+			'validators' => \mb_substr(\implode(',', $failed), 0, static::PARAM_MAX_LENGTH),
 		]]);
 		return true;
 	}
@@ -691,11 +688,9 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$app = $this->getApplication();
 		$amended = 0;
-		foreach ($app->getModulesByType(THttpHeadersManager::class) as $id => $manager) {
-			$manager ??= $app->getModule($id);
-			if (!($manager instanceof THttpHeadersManager)) {
-				continue;
-			}
+		foreach (\array_keys($app->getModulesByType(THttpHeadersManager::class)) as $id) {
+			$manager = $app->getModule($id);   // loads a lazy module; returns a loaded one as is
+			\assert($manager instanceof THttpHeadersManager);
 			foreach ($manager->getHeadersByClass(THttpHeaderCsp::class) as $csp) {
 				if ($this->amendCspHeader($csp)) {
 					$amended++;
@@ -721,12 +716,12 @@ class GAnalyticsModule extends TPluginModule
 			if ($current === null) {
 				continue;
 			}
-			$tokens = preg_split('/\s+/', trim($current), -1, PREG_SPLIT_NO_EMPTY);
-			$missing = array_diff($sources, $tokens);
-			if (count($missing) === 0 && $csp->hasPolicy($directive)) {
+			$tokens = \preg_split('/\s+/', \trim($current), -1, PREG_SPLIT_NO_EMPTY);
+			$missing = \array_diff($sources, $tokens);
+			if (\count($missing) === 0 && $csp->hasPolicy($directive)) {
 				continue;
 			}
-			$csp->setPolicy($directive, implode(' ', array_merge($tokens, $missing)));
+			$csp->setPolicy($directive, \implode(' ', \array_merge($tokens, $missing)));
 			$changed = true;
 		}
 		return $changed;
@@ -742,14 +737,14 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$sources = static::CSP_SOURCES;
 		foreach ([$this->getTagUrl(), $this->getContainerUrl()] as $url) {
-			$parts = parse_url($url);
-			$host = strtolower($parts['host'] ?? '');
-			if ($host === '' || $host === 'googletagmanager.com' || str_ends_with($host, '.googletagmanager.com')) {
+			$parts = \parse_url($url);
+			$host = \strtolower($parts['host'] ?? '');
+			if ($host === '' || $host === 'googletagmanager.com' || \str_ends_with($host, '.googletagmanager.com')) {
 				continue;
 			}
 			$origin = ($parts['scheme'] ?? 'https') . '://' . $host . (isset($parts['port']) ? ':' . $parts['port'] : '');
 			foreach ($sources as $directive => $list) {
-				if (!in_array($origin, $list, true)) {
+				if (!\in_array($origin, $list, true)) {
 					$sources[$directive][] = $origin;
 				}
 			}
@@ -777,7 +772,7 @@ class GAnalyticsModule extends TPluginModule
 		if (!static::isEventName($name)) {
 			throw new TInvalidDataValueException('ganalytics_event_name_invalid', $name);
 		}
-		$this->queueCall(count($params) > 0 ? ['event', $name, $params] : ['event', $name], $deferred);
+		$this->queueCall(\count($params) > 0 ? ['event', $name, $params] : ['event', $name], $deferred);
 	}
 
 	/**
@@ -793,7 +788,7 @@ class GAnalyticsModule extends TPluginModule
 		$provider = $this->getConsentProvider();
 		if ($provider instanceof IGAnalyticsConsentStore) {
 			$state = GAnalyticsCookieConsentProvider::normalizeState($params);
-			if (count($state) > 0) {
+			if (\count($state) > 0) {
 				$provider->setConsentState($state);
 			}
 		}
@@ -827,9 +822,9 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function queueCall(array $args, bool $deferred = false): void
 	{
-		$args = array_values($args);
-		if (count($args) === 0 || !is_string($args[0]) || trim($args[0]) === '') {
-			throw new TInvalidDataValueException('ganalytics_gtag_call_invalid', json_encode($args, JSON_UNESCAPED_SLASHES) ?: '');
+		$args = \array_values($args);
+		if (\count($args) === 0 || !\is_string($args[0]) || \trim($args[0]) === '') {
+			throw new TInvalidDataValueException('ganalytics_gtag_call_invalid', \json_encode($args, JSON_UNESCAPED_SLASHES) ?: '');
 		}
 		if ($deferred || $this->_page === null || $this->_flushed) {
 			$this->storeDeferredCalls([$args]);
@@ -856,10 +851,10 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function flushCalls(TPage $page): int
 	{
-		$calls = array_merge($this->loadDeferredCalls(), $this->_calls);
+		$calls = \array_merge($this->loadDeferredCalls(), $this->_calls);
 		$this->_calls = [];
 		$this->_flushed = true;
-		if (count($calls) === 0) {
+		if (\count($calls) === 0) {
 			return 0;
 		}
 		if ($page->getIsCallback()) {
@@ -874,7 +869,7 @@ class GAnalyticsModule extends TPluginModule
 		} else {
 			$page->getClientScript()->registerEndScript(static::CALLS_SCRIPT_KEY, $this->getCallsScript($calls));
 		}
-		return count($calls);
+		return \count($calls);
 	}
 
 	/**
@@ -888,13 +883,13 @@ class GAnalyticsModule extends TPluginModule
 		$lines = [];
 		foreach ($calls as $args) {
 			if ($this->isDataLayerCall($args)) {
-				$event = ['event' => $args[1]] + (is_array($args[2] ?? null) ? $args[2] : []);
+				$event = ['event' => $args[1]] + (\is_array($args[2] ?? null) ? $args[2] : []);
 				$lines[] = $this->getDataLayerName() . '.push(' . TJavaScript::encode($event) . ');';
 			} else {
-				$lines[] = 'gtag(' . implode(', ', array_map(fn ($arg) => TJavaScript::encode($arg), $args)) . ');';
+				$lines[] = 'gtag(' . \implode(', ', \array_map(fn ($arg) => TJavaScript::encode($arg), $args)) . ');';
 			}
 		}
-		return implode("\n", $lines);
+		return \implode("\n", $lines);
 	}
 
 	/**
@@ -905,7 +900,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function isDataLayerCall(array $args): bool
 	{
-		return ($args[0] ?? null) === 'event' && is_string($args[1] ?? null) && !$this->getUsesGtag() && $this->getContainerId() !== null;
+		return ($args[0] ?? null) === 'event' && \is_string($args[1] ?? null) && !$this->getUsesGtag() && $this->getContainerId() !== null;
 	}
 
 	/**
@@ -920,7 +915,7 @@ class GAnalyticsModule extends TPluginModule
 		}
 		$calls = $store[static::SESSION_KEY];
 		unset($store[static::SESSION_KEY]);
-		return is_array($calls) ? array_values($calls) : [];
+		return \is_array($calls) ? \array_values($calls) : [];
 	}
 
 	/**
@@ -932,11 +927,11 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$store = $this->getDeferredStore(true);
 		if ($store === null) {
-			Prado::log('No session is available; ' . count($calls) . ' deferred gtag call(s) dropped.', TLogger::NOTICE, static::class);
+			Prado::log('No session is available; ' . \count($calls) . ' deferred gtag call(s) dropped.', TLogger::NOTICE, static::class);
 			return;
 		}
-		$existing = isset($store[static::SESSION_KEY]) && is_array($store[static::SESSION_KEY]) ? $store[static::SESSION_KEY] : [];
-		$store[static::SESSION_KEY] = array_merge(array_values($existing), $calls);
+		$existing = isset($store[static::SESSION_KEY]) && \is_array($store[static::SESSION_KEY]) ? $store[static::SESSION_KEY] : [];
+		$store[static::SESSION_KEY] = \array_merge(\array_values($existing), $calls);
 	}
 
 	/**
@@ -945,21 +940,15 @@ class GAnalyticsModule extends TPluginModule
 	 * visitor gets no session for the sake of a lookup that cannot find anything. Override to use
 	 * another store.
 	 * @param bool $forWrite Whether calls are about to be stored, which opens a session in any case.
-	 * @return ?\ArrayAccess The store, or null when the application has no session or none holds deferred calls.
+	 * @return ?\ArrayAccess The store, or null when no session holds deferred calls.
 	 */
 	protected function getDeferredStore(bool $forWrite = false): ?\ArrayAccess
 	{
 		$app = $this->getApplication();
 		$session = $app->getSession();
-		if (!($session instanceof THttpSession)) {
-			return $session instanceof \ArrayAccess ? $session : null;
-		}
 		if (!$session->getIsStarted()) {
-			if (!$forWrite) {
-				$request = $app->getRequest();
-				if (!($request instanceof THttpRequest) || $request->getCookies()->findCookieByName($session->getSessionName()) === null) {
-					return null;
-				}
+			if (!$forWrite && $app->getRequest()->getCookies()->findCookieByName($session->getSessionName()) === null) {
+				return null;
 			}
 			$session->open();
 		}
@@ -973,7 +962,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public static function isEventName(string $name): bool
 	{
-		return preg_match(static::EVENT_NAME_PATTERN, $name) === 1;
+		return \preg_match(static::EVENT_NAME_PATTERN, $name) === 1;
 	}
 
 	// =========================================================================
@@ -995,7 +984,7 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$mp = $this->getMeasurementProtocol();
 		$event = ['name' => $name];
-		if (count($params) > 0) {
+		if (\count($params) > 0) {
 			$event['params'] = $params;
 		}
 		return $mp->send($clientId ?? $this->getClientId() ?? $mp->newClientId(), [$event], $this->getEffectiveUserId());
@@ -1026,15 +1015,11 @@ class GAnalyticsModule extends TPluginModule
 
 	/**
 	 * Returns the visitor's GA4 client id from the request's `_ga` cookie.
-	 * @return ?string The client id, or null when the request has no `_ga` cookie or is not an HTTP request.
+	 * @return ?string The client id, or null when the request has no `_ga` cookie.
 	 */
 	public function getClientId(): ?string
 	{
-		$request = $this->getApplication()->getRequest();
-		if (!($request instanceof THttpRequest)) {
-			return null;
-		}
-		$cookie = $request->getCookies()->findCookieByName('_ga');
+		$cookie = $this->getApplication()->getRequest()->getCookies()->findCookieByName('_ga');
 		return $cookie === null ? null : GAnalyticsMeasurementProtocol::clientIdFromCookie((string) $cookie->getValue());
 	}
 
@@ -1052,7 +1037,7 @@ class GAnalyticsModule extends TPluginModule
 	public function setApiSecret($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_apiSecret = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_apiSecret = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
 	// =========================================================================
@@ -1165,7 +1150,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function getCredentials(): ?IGAnalyticsCredentials
 	{
-		if (is_string($this->_credentials)) {
+		if (\is_string($this->_credentials)) {
 			$module = $this->getApplication()->getModule($this->_credentials);
 			if (!($module instanceof IGAnalyticsCredentials)) {
 				throw new TConfigurationException('ganalytics_module_invalid', $this->_credentials, IGAnalyticsCredentials::class);
@@ -1185,10 +1170,10 @@ class GAnalyticsModule extends TPluginModule
 	{
 		if ($value === null || $value === '' || $value instanceof IGAnalyticsCredentials) {
 			$this->_credentials = $value === '' ? null : $value;
-		} elseif (is_array($value)) {
+		} elseif (\is_array($value)) {
 			$this->_credentials = $this->createConfigured($value, IGAnalyticsCredentials::class);
 		} else {
-			$this->_credentials = trim((string) TPropertyValue::ensureString($value));
+			$this->_credentials = \trim((string) TPropertyValue::ensureString($value));
 		}
 	}
 
@@ -1204,7 +1189,7 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$class = $properties['class'] ?? null;
 		unset($properties['class'], $properties['id']);
-		if (!is_string($class) || $class === '' || !is_a($class, $interface, true) || !is_a($class, TComponent::class, true)) {
+		if (!\is_string($class) || $class === '' || !\is_a($class, $interface, true) || !\is_a($class, TComponent::class, true)) {
 			throw new TConfigurationException('ganalytics_class_invalid', (string) $class, $interface);
 		}
 		$component = Prado::createComponent($class);
@@ -1245,7 +1230,7 @@ class GAnalyticsModule extends TPluginModule
 	public function setRealtimeMetrics($value)
 	{
 		$names = $this->ensureNames($value);
-		$this->_realtimeMetrics = count($names) > 0 ? $names : ['activeUsers'];
+		$this->_realtimeMetrics = \count($names) > 0 ? $names : ['activeUsers'];
 	}
 
 	/**
@@ -1273,11 +1258,11 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$names = [];
 		foreach (TPropertyValue::ensureArray($value, TPropertyValue::ARRAY_SKIP_EMPTY) as $name) {
-			if (trim((string) $name) !== '') {
-				$names[] = trim((string) $name);
+			if (\trim((string) $name) !== '') {
+				$names[] = \trim((string) $name);
 			}
 		}
-		return array_values(array_unique($names));
+		return \array_values(\array_unique($names));
 	}
 
 	// =========================================================================
@@ -1293,9 +1278,9 @@ class GAnalyticsModule extends TPluginModule
 	public function getTagScriptUrl(): string
 	{
 		$url = $this->getTagUrl();
-		$url .= (str_contains($url, '?') ? '&' : '?') . 'id=' . rawurlencode((string) $this->getMeasurementId());
+		$url .= (\str_contains($url, '?') ? '&' : '?') . 'id=' . \rawurlencode((string) $this->getMeasurementId());
 		if ($this->getDataLayerName() !== static::DEFAULT_DATA_LAYER_NAME) {
-			$url .= '&l=' . rawurlencode($this->getDataLayerName());
+			$url .= '&l=' . \rawurlencode($this->getDataLayerName());
 		}
 		return $url;
 	}
@@ -1317,14 +1302,14 @@ class GAnalyticsModule extends TPluginModule
 			"function gtag(){{$layer}.push(arguments);}",
 		];
 		$consent = $this->getEffectiveConsentDefaults();
-		if (count($consent) > 0) {
+		if (\count($consent) > 0) {
 			$lines[] = "gtag('consent', 'default', " . TJavaScript::encode($consent) . ');';
 		}
 		if ($this->getUsesGtag()) {
 			$lines[] = "gtag('js', new Date());";
 			$id = TJavaScript::quoteString((string) $this->getMeasurementId());
 			$options = $this->getEffectiveConfigOptions($page);
-			$lines[] = count($options) > 0
+			$lines[] = \count($options) > 0
 				? "gtag('config', {$id}, " . TJavaScript::encode($options) . ');'
 				: "gtag('config', {$id});";
 			foreach ($this->getAdditionalMeasurementIds() as $additional) {
@@ -1334,7 +1319,7 @@ class GAnalyticsModule extends TPluginModule
 		if ($this->getContainerId() !== null) {
 			$lines[] = $this->getContainerScript();
 		}
-		return implode("\n", $lines);
+		return \implode("\n", $lines);
 	}
 
 	/**
@@ -1359,11 +1344,11 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function getContainerNoScriptHtml(): string
 	{
-		$url = dirname($this->getContainerUrl()) . '/ns.html?id=' . rawurlencode((string) $this->getContainerId());
+		$url = \dirname($this->getContainerUrl()) . '/ns.html?id=' . \rawurlencode((string) $this->getContainerId());
 		if ($this->getDataLayerName() !== static::DEFAULT_DATA_LAYER_NAME) {
-			$url .= '&l=' . rawurlencode($this->getDataLayerName());
+			$url .= '&l=' . \rawurlencode($this->getDataLayerName());
 		}
-		return '<noscript><iframe src="' . htmlspecialchars($url, ENT_QUOTES) . '" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>';
+		return '<noscript><iframe src="' . \htmlspecialchars($url, ENT_QUOTES) . '" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>';
 	}
 
 	/**
@@ -1377,7 +1362,7 @@ class GAnalyticsModule extends TPluginModule
 		$defaults = $this->getConsentDefaults();
 		$provider = $this->getConsentProvider();
 		if ($provider !== null) {
-			$defaults = array_merge($defaults, $provider->getConsentState());
+			$defaults = \array_merge($defaults, $provider->getConsentState());
 		}
 		return $defaults;
 	}
@@ -1389,7 +1374,7 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	public function getConsentProvider(): ?IGAnalyticsConsentProvider
 	{
-		if (is_string($this->_consentProvider)) {
+		if (\is_string($this->_consentProvider)) {
 			$module = $this->getApplication()->getModule($this->_consentProvider);
 			if (!($module instanceof IGAnalyticsConsentProvider)) {
 				throw new TConfigurationException('ganalytics_module_invalid', $this->_consentProvider, IGAnalyticsConsentProvider::class);
@@ -1409,10 +1394,10 @@ class GAnalyticsModule extends TPluginModule
 	{
 		if ($value === null || $value === '' || $value instanceof IGAnalyticsConsentProvider) {
 			$this->_consentProvider = $value === '' ? null : $value;
-		} elseif (is_array($value)) {
+		} elseif (\is_array($value)) {
 			$this->_consentProvider = $this->createConfigured($value, IGAnalyticsConsentProvider::class);
 		} else {
-			$this->_consentProvider = trim((string) TPropertyValue::ensureString($value));
+			$this->_consentProvider = \trim((string) TPropertyValue::ensureString($value));
 		}
 	}
 
@@ -1483,7 +1468,7 @@ class GAnalyticsModule extends TPluginModule
 		if ($name === '') {
 			return null;
 		}
-		return hash_hmac('sha256', $name, (string) $app->getSecurityManager()->getValidationKey());
+		return \hash_hmac('sha256', $name, (string) $app->getSecurityManager()->getValidationKey());
 	}
 
 	// =========================================================================
@@ -1532,8 +1517,8 @@ class GAnalyticsModule extends TPluginModule
 	 */
 	protected function ensureMeasurementId($value): string
 	{
-		$id = trim((string) TPropertyValue::ensureString($value));
-		if (strlen($id) > static::MEASUREMENT_ID_MAX_LENGTH || !preg_match(static::MEASUREMENT_ID_PATTERN, $id)) {
+		$id = \trim((string) TPropertyValue::ensureString($value));
+		if (\strlen($id) > static::MEASUREMENT_ID_MAX_LENGTH || !\preg_match(static::MEASUREMENT_ID_PATTERN, $id)) {
 			throw new TInvalidDataValueException('ganalytics_measurementid_invalid', $id);
 		}
 		return $id;
@@ -1574,11 +1559,11 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$ids = [];
 		foreach (TPropertyValue::ensureArray($value, TPropertyValue::ARRAY_SKIP_EMPTY) as $id) {
-			if (trim((string) $id) !== '') {
+			if (\trim((string) $id) !== '') {
 				$ids[] = $this->ensureMeasurementId($id);
 			}
 		}
-		$this->_additionalMeasurementIds = array_values(array_unique($ids));
+		$this->_additionalMeasurementIds = \array_values(\array_unique($ids));
 	}
 
 	/**
@@ -1615,11 +1600,11 @@ class GAnalyticsModule extends TPluginModule
 	{
 		$modes = [];
 		foreach (TPropertyValue::ensureArray($value, TPropertyValue::ARRAY_SKIP_EMPTY) as $mode) {
-			if (trim((string) $mode) !== '') {
-				$modes[] = TPropertyValue::ensureEnum(trim((string) $mode), TApplicationMode::class);
+			if (\trim((string) $mode) !== '') {
+				$modes[] = TPropertyValue::ensureEnum(\trim((string) $mode), TApplicationMode::class);
 			}
 		}
-		$this->_enabledModes = array_values(array_unique($modes));
+		$this->_enabledModes = \array_values(\array_unique($modes));
 	}
 
 	/**
@@ -1631,7 +1616,7 @@ class GAnalyticsModule extends TPluginModule
 			return false;
 		}
 		$modes = $this->getEnabledModes();
-		return count($modes) === 0 || in_array((string) $this->getApplication()->getMode(), $modes, true);
+		return \count($modes) === 0 || \in_array((string) $this->getApplication()->getMode(), $modes, true);
 	}
 
 	/**
@@ -1734,20 +1719,20 @@ class GAnalyticsModule extends TPluginModule
 		if ($value === null) {
 			return [];
 		}
-		if (is_array($value)) {
+		if (\is_array($value)) {
 			return $value;
 		}
-		if (is_string($value) || $value instanceof \Stringable) {
-			$json = trim((string) $value);
+		if (\is_string($value) || $value instanceof \Stringable) {
+			$json = \trim((string) $value);
 			if ($json === '') {
 				return [];
 			}
-			$decoded = json_decode($json, true);
-			if (is_array($decoded)) {
+			$decoded = \json_decode($json, true);
+			if (\is_array($decoded)) {
 				return $decoded;
 			}
 		}
-		throw new TInvalidDataValueException('ganalytics_options_invalid', $name, is_scalar($value) || $value instanceof \Stringable ? (string) $value : get_debug_type($value));
+		throw new TInvalidDataValueException('ganalytics_options_invalid', $name, \is_scalar($value) || $value instanceof \Stringable ? (string) $value : \get_debug_type($value));
 	}
 
 	/**
@@ -1766,7 +1751,7 @@ class GAnalyticsModule extends TPluginModule
 	public function setUserId($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_userId = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_userId = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 
 	/**
@@ -1806,9 +1791,9 @@ class GAnalyticsModule extends TPluginModule
 			$this->_tagUrl = static::DEFAULT_TAG_URL;
 			return;
 		}
-		$url = trim((string) TPropertyValue::ensureString($value));
-		$scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-		if (!in_array($scheme, ['http', 'https'], true) || filter_var($url, FILTER_VALIDATE_URL) === false || str_contains($url, '#')) {
+		$url = \trim((string) TPropertyValue::ensureString($value));
+		$scheme = \strtolower((string) \parse_url($url, PHP_URL_SCHEME));
+		if (!\in_array($scheme, ['http', 'https'], true) || \filter_var($url, FILTER_VALIDATE_URL) === false || \str_contains($url, '#')) {
 			throw new TInvalidDataValueException('ganalytics_tagurl_invalid', $url);
 		}
 		$this->_tagUrl = $url;
@@ -1836,8 +1821,8 @@ class GAnalyticsModule extends TPluginModule
 			$this->_dataLayerName = static::DEFAULT_DATA_LAYER_NAME;
 			return;
 		}
-		$name = trim((string) TPropertyValue::ensureString($value));
-		if (!preg_match(static::DATA_LAYER_NAME_PATTERN, $name)) {
+		$name = \trim((string) TPropertyValue::ensureString($value));
+		if (!\preg_match(static::DATA_LAYER_NAME_PATTERN, $name)) {
 			throw new TInvalidDataValueException('ganalytics_datalayername_invalid', $name);
 		}
 		$this->_dataLayerName = $name;
@@ -1896,8 +1881,8 @@ class GAnalyticsModule extends TPluginModule
 			$this->_containerId = null;
 			return;
 		}
-		$id = trim((string) TPropertyValue::ensureString($value));
-		if (!preg_match(static::CONTAINER_ID_PATTERN, $id)) {
+		$id = \trim((string) TPropertyValue::ensureString($value));
+		if (!\preg_match(static::CONTAINER_ID_PATTERN, $id)) {
 			throw new TInvalidDataValueException('ganalytics_containerid_invalid', $id);
 		}
 		$this->_containerId = $id;
@@ -1925,9 +1910,9 @@ class GAnalyticsModule extends TPluginModule
 			$this->_containerUrl = static::DEFAULT_CONTAINER_URL;
 			return;
 		}
-		$url = trim((string) TPropertyValue::ensureString($value));
-		$scheme = strtolower((string) parse_url($url, PHP_URL_SCHEME));
-		if (!in_array($scheme, ['http', 'https'], true) || filter_var($url, FILTER_VALIDATE_URL) === false || str_contains($url, '?') || str_contains($url, '#')) {
+		$url = \trim((string) TPropertyValue::ensureString($value));
+		$scheme = \strtolower((string) \parse_url($url, PHP_URL_SCHEME));
+		if (!\in_array($scheme, ['http', 'https'], true) || \filter_var($url, FILTER_VALIDATE_URL) === false || \str_contains($url, '?') || \str_contains($url, '#')) {
 			throw new TInvalidDataValueException('ganalytics_tagurl_invalid', $url);
 		}
 		$this->_containerUrl = $url;
@@ -2011,7 +1996,7 @@ class GAnalyticsModule extends TPluginModule
 	public function setLoginMethod($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_loginMethod = ($value === null) ? static::DEFAULT_LOGIN_METHOD : mb_substr(trim((string) TPropertyValue::ensureString($value)), 0, static::PARAM_MAX_LENGTH);
+		$this->_loginMethod = ($value === null) ? static::DEFAULT_LOGIN_METHOD : \mb_substr(\trim((string) TPropertyValue::ensureString($value)), 0, static::PARAM_MAX_LENGTH);
 	}
 
 	/**
@@ -2033,8 +2018,8 @@ class GAnalyticsModule extends TPluginModule
 			$this->_shellClass = static::DEFAULT_SHELL_CLASS;
 			return;
 		}
-		$class = trim((string) TPropertyValue::ensureString($value));
-		if (!is_a($class, TShellAction::class, true)) {
+		$class = \trim((string) TPropertyValue::ensureString($value));
+		if (!\is_a($class, TShellAction::class, true)) {
 			throw new TConfigurationException('ganalytics_class_invalid', $class, TShellAction::class);
 		}
 		$this->_shellClass = $class;

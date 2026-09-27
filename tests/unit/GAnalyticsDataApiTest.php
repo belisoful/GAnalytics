@@ -157,8 +157,8 @@ class GAnalyticsDataApiTest extends TestCase
 	{
 		$api = $this->api();
 		$api->answers = [
-			[200, json_encode(['items' => [['n' => 1], ['n' => 2]], 'nextPageToken' => 'p2'])],
-			[200, json_encode(['items' => [['n' => 3]]])],
+			[200, \json_encode(['items' => [['n' => 1], ['n' => 2]], 'nextPageToken' => 'p2'])],
+			[200, \json_encode(['items' => [['n' => 3]]])],
 		];
 		self::assertSame([['n' => 1], ['n' => 2], ['n' => 3]], $api->requestAll('things', 'items', ['pageSize' => 2]));
 		self::assertCount(2, $api->requests);

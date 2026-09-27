@@ -3,6 +3,9 @@
 namespace belisoful\GAnalytics\Test\Unit;
 
 use belisoful\GAnalytics\GAnalyticsAccessTokenCredentials;
+use belisoful\GAnalytics\GAnalyticsAdminApi;
+use belisoful\GAnalytics\GAnalyticsDataApi;
+use belisoful\GAnalytics\GAnalyticsMeasurementProtocol;
 use belisoful\GAnalytics\GAnalyticsModule;
 use belisoful\GAnalytics\GAnalyticsPageBehavior;
 use belisoful\GAnalytics\GAnalyticsReport;
@@ -143,7 +146,7 @@ class GAnalyticsModuleTest extends TestCase
 	/** Registers a module under a unique id, since the application never forgets one. */
 	private function registerModule(\Prado\IModule $module, string $prefix): string
 	{
-		$id = $prefix . '-' . uniqid();
+		$id = $prefix . '-' . \uniqid();
 		$module->setID($id);
 		$this->_app->setModule($id, $module);
 		return $id;
@@ -256,7 +259,7 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertStringEndsWith("'script',\"dataLayer\",\"GTM-ABC1234\");", $script);
 		self::assertStringNotContainsString("gtag('js'", $script);
 		self::assertStringNotContainsString("gtag('config'", $script);
-		self::assertSame($module->getContainerScript(), explode("\n", $script)[2]);
+		self::assertSame($module->getContainerScript(), \explode("\n", $script)[2]);
 	}
 
 	public function testGtagAndContainerTogether()
@@ -264,7 +267,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module = $this->module();
 		$module->setContainerId('GTM-ABC1234');
 		$module->setConsentDefaults(['ad_storage' => 'denied']);
-		$lines = explode("\n", $module->getTagScript());
+		$lines = \explode("\n", $module->getTagScript());
 		self::assertSame("gtag('consent', 'default', {'ad_storage':\"denied\"});", $lines[2]);
 		self::assertSame("gtag('js', new Date());", $lines[3]);
 		self::assertSame("gtag('config', \"G-TEST1234AB\");", $lines[4]);
@@ -357,7 +360,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module = $this->module();
 		$module->setTagUrl('https://metrics.example.com/gtag/js');
 		$module->setContainerUrl('https://metrics.example.com/gtm.js');
-		self::assertSame(1, substr_count(implode(' ', $module->getCspSources()[TCspDirective::ScriptSrc]), 'https://metrics.example.com'), 'One origin, once.');
+		self::assertSame(1, \substr_count(\implode(' ', $module->getCspSources()[TCspDirective::ScriptSrc]), 'https://metrics.example.com'), 'One origin, once.');
 		$module->setContainerUrl('https://tags.example.org/gtm.js');
 		self::assertSame(['https://*.googletagmanager.com', 'https://metrics.example.com', 'https://tags.example.org'], $module->getCspSources()[TCspDirective::ScriptSrc]);
 	}
@@ -373,7 +376,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module = $this->probe();
 		$module->setTrackExceptions(true);
 		$module->setTrackLogins(true);
-		self::assertSame([$manager], array_values(array_filter($module->getAuthManagers(), fn ($m) => $m === $manager)));
+		self::assertSame([$manager], \array_values(\array_filter($module->getAuthManagers(), fn ($m) => $m === $manager)));
 		$module->attachPageServiceHandler($this->_app, null);
 		self::assertTrue($this->_app->hasEventHandler('onError'));
 		self::assertTrue($manager->hasEventHandler('onLogin'));
@@ -401,9 +404,9 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame('THttpException', $params['error_type']);
 		self::assertSame(404, $params['status_code']);
 
-		self::assertTrue($module->errorHandler($this->_app, new \RuntimeException(str_repeat('x', 200))));
+		self::assertTrue($module->errorHandler($this->_app, new \RuntimeException(\str_repeat('x', 200))));
 		$params = $module->protocol->lastPayload()['events'][0]['params'];
-		self::assertSame(100, mb_strlen($params['description']), 'The description is cut to the GA4 limit.');
+		self::assertSame(100, \mb_strlen($params['description']), 'The description is cut to the GA4 limit.');
 		self::assertArrayNotHasKey('status_code', $params);
 
 		self::assertFalse($module->errorHandler($this->_app, 'not a throwable'));
@@ -515,7 +518,7 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertInstanceOf(FakeConsentModule::class, $module->getConsentProvider());
 		self::assertNotSame($consent, $module->getConsentProvider());
 
-		$module->setConsentProvider('no-such-module-' . uniqid());
+		$module->setConsentProvider('no-such-module-' . \uniqid());
 		try {
 			$module->getConsentProvider();
 			self::fail('Expected an exception');
@@ -620,7 +623,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module->setCredentials('');
 		self::assertNull($module->getCredentials());
 
-		$module->setCredentials('no-such-module-' . uniqid());
+		$module->setCredentials('no-such-module-' . \uniqid());
 		try {
 			$module->getCredentials();
 			self::fail('Expected an exception');
@@ -635,6 +638,24 @@ class GAnalyticsModuleTest extends TestCase
 		}
 		$this->expectException(TConfigurationException::class);
 		$module->setCredentials(['class' => \stdClass::class]);
+	}
+
+	public function testTheRealClientsAreCreatedOnFirstUse()
+	{
+		$module = $this->module();
+		$module->setPropertyId('1');
+		$module->setApiSecret('s');
+		$mp = $module->getMeasurementProtocol();
+		self::assertSame(GAnalyticsMeasurementProtocol::class, $mp::class);
+		self::assertSame($mp, $module->getMeasurementProtocol(), 'Created once.');
+		self::assertSame('G-TEST1234AB', $mp->getMeasurementId());
+		$data = $module->getDataApi();
+		self::assertSame(GAnalyticsDataApi::class, $data::class);
+		self::assertSame($data, $module->getDataApi());
+		self::assertSame('1', $data->getPropertyId());
+		$admin = $module->getAdminApi();
+		self::assertSame(GAnalyticsAdminApi::class, $admin::class);
+		self::assertSame($admin, $module->getAdminApi());
 	}
 
 	public function testPropertyIdIsValidated()
@@ -796,7 +817,7 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertNull($module->getEffectiveUserId(), 'Off by default.');
 
 		$module->setUserIdFromUser(true);
-		$expected = hash_hmac('sha256', 'alice', 'validation-key');
+		$expected = \hash_hmac('sha256', 'alice', 'validation-key');
 		self::assertSame($expected, $module->getEffectiveUserId());
 		self::assertSame(['user_id' => $expected], $module->getEffectiveConfigOptions());
 		self::assertStringNotContainsString('alice', $module->getTagScript(), 'The name never reaches the page.');
@@ -976,7 +997,7 @@ class GAnalyticsModuleTest extends TestCase
 			'digit first' => ['1login'],
 			'dash' => ['sign-up'],
 			'space' => ['sign up'],
-			'too long' => [str_repeat('a', 41)],
+			'too long' => [\str_repeat('a', 41)],
 			'empty' => [''],
 		];
 	}
@@ -993,7 +1014,7 @@ class GAnalyticsModuleTest extends TestCase
 	{
 		self::assertTrue(GAnalyticsModule::isEventName('login'));
 		self::assertTrue(GAnalyticsModule::isEventName('Sign_Up2'));
-		self::assertTrue(GAnalyticsModule::isEventName(str_repeat('a', 40)));
+		self::assertTrue(GAnalyticsModule::isEventName(\str_repeat('a', 40)));
 	}
 
 	// =========================================================================
@@ -1084,7 +1105,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module->setTagUrl('https://metrics.example.com:8443/gtag/js');
 		$sources = $module->getCspSources();
 		foreach ([TCspDirective::ScriptSrc, TCspDirective::ConnectSrc, TCspDirective::ImgSrc] as $directive) {
-			self::assertSame('https://metrics.example.com:8443', end($sources[$directive]), $directive);
+			self::assertSame('https://metrics.example.com:8443', \end($sources[$directive]), $directive);
 		}
 	}
 
@@ -1127,7 +1148,7 @@ class GAnalyticsModuleTest extends TestCase
 		$csp->setPolicies([TCspDirective::DefaultSrc => "'self'"]);
 		$manager->addHeader($csp);
 		$manager->addHeader(new THttpHeaderCsp());
-		$this->_app->setModule('headers-' . uniqid(), $manager);
+		$this->_app->setModule('headers-' . \uniqid(), $manager);
 
 		$module = $this->module();
 		self::assertSame(1, $module->amendCspPolicies(), 'The empty header restricts nothing.');
@@ -1174,7 +1195,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module = new GAnalyticsModule();
 		foreach (['G-ABC123XYZ9', 'AW-123456789', 'DC-1234567', 'GT-ABCDEFG', 'UA-12345678-1', ' G-TRIMMED1 '] as $id) {
 			$module->setMeasurementId($id);
-			self::assertSame(trim($id), $module->getMeasurementId(), $id);
+			self::assertSame(\trim($id), $module->getMeasurementId(), $id);
 		}
 	}
 
@@ -1191,7 +1212,7 @@ class GAnalyticsModuleTest extends TestCase
 			'quote' => ["G-ABC'123"],
 			'script' => ['G-1</script>'],
 			'space' => ['G-ABC 123'],
-			'too long' => ['G-' . str_repeat('A', 39)],
+			'too long' => ['G-' . \str_repeat('A', 39)],
 		];
 	}
 
@@ -1409,7 +1430,7 @@ class GAnalyticsModuleTest extends TestCase
 		$module->setSendPageView(false);
 		$module->setConfigOptions(['user_id' => "u'1</script>", 'cookie_expires' => 3600, 'allow_google_signals' => false]);
 		$script = $module->getTagScript();
-		$lines = explode("\n", $script);
+		$lines = \explode("\n", $script);
 		self::assertSame('window.dataLayer = window.dataLayer || [];', $lines[0]);
 		self::assertSame('function gtag(){dataLayer.push(arguments);}', $lines[1]);
 		self::assertSame("gtag('consent', 'default', {'ad_storage':\"denied\",'wait_for_update':500});", $lines[2]);

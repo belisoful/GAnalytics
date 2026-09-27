@@ -45,7 +45,7 @@ class GAnalyticsReportTest extends TestCase
 		self::assertSame($report->getRows(), $report->toArray());
 		self::assertSame($report->getRows(), $report->getRows(), 'Rows are built once.');
 		self::assertCount(2, $report);
-		self::assertSame(['US', 'DE'], array_column(iterator_to_array($report), 'country'));
+		self::assertSame(['US', 'DE'], \array_column(\iterator_to_array($report), 'country'));
 		self::assertSame(40, $report->getRowCount());
 		self::assertSame(['currencyCode' => 'USD', 'timeZone' => 'America/Los_Angeles'], $report->getMetadata());
 		self::assertSame(['tokensPerDay' => ['consumed' => 1, 'remaining' => 24999]], $report->getPropertyQuota());

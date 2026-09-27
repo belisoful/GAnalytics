@@ -96,7 +96,7 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 	 */
 	public function getColumns(): array
 	{
-		return array_merge($this->_dimensionHeaders, array_keys($this->_metricHeaders));
+		return \array_merge($this->_dimensionHeaders, \array_keys($this->_metricHeaders));
 	}
 
 	/**
@@ -145,7 +145,7 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 	 */
 	public function getRowCount(): int
 	{
-		return (int) ($this->_response['rowCount'] ?? count($this->getRows()));
+		return (int) ($this->_response['rowCount'] ?? \count($this->getRows()));
 	}
 
 	/**
@@ -187,7 +187,7 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 			}
 			$i = 0;
 			foreach ((array) ($row['metricValues'] ?? []) as $value) {
-				$name = array_keys($this->_metricHeaders)[$i] ?? 'metric' . $i;
+				$name = \array_keys($this->_metricHeaders)[$i] ?? 'metric' . $i;
 				$entry[$name] = static::castMetric($value['value'] ?? null, $this->_metricHeaders[$name] ?? 'TYPE_STRING');
 				$i++;
 			}
@@ -207,10 +207,10 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 		if ($value === null) {
 			return null;
 		}
-		if (in_array($type, static::INTEGER_TYPES, true)) {
+		if (\in_array($type, static::INTEGER_TYPES, true)) {
 			return (int) $value;
 		}
-		if (in_array($type, static::FLOAT_TYPES, true)) {
+		if (\in_array($type, static::FLOAT_TYPES, true)) {
 			return (float) $value;
 		}
 		return (string) $value;
@@ -221,7 +221,7 @@ class GAnalyticsReport extends TComponent implements \IteratorAggregate, \Counta
 	 */
 	public function count(): int
 	{
-		return count($this->getRows());
+		return \count($this->getRows());
 	}
 
 	/**

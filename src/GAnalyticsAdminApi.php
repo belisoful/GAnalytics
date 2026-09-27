@@ -130,7 +130,7 @@ class GAnalyticsAdminApi extends GAnalyticsApiClient
 	 */
 	public static function resourceName(string $collection, string $idOrName): string
 	{
-		$idOrName = trim($idOrName);
-		return str_starts_with($idOrName, $collection . '/') ? $idOrName : $collection . '/' . $idOrName;
+		$idOrName = \trim($idOrName);
+		return \str_starts_with($idOrName, $collection . '/') ? $idOrName : $collection . '/' . $idOrName;
 	}
 }

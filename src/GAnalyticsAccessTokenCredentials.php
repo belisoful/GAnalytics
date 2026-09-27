@@ -58,6 +58,6 @@ class GAnalyticsAccessTokenCredentials extends TComponent implements IGAnalytics
 	public function setAccessToken($value)
 	{
 		$value = TPropertyValue::ensureNullIfEmpty($value);
-		$this->_accessToken = ($value === null) ? null : trim((string) TPropertyValue::ensureString($value));
+		$this->_accessToken = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
 	}
 }

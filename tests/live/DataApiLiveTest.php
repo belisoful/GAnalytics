@@ -42,7 +42,7 @@ class DataApiLiveTest extends LiveTestCase
 	public function testMetadataListsTheStandardDimensions()
 	{
 		$metadata = $this->dataApi()->getMetadata();
-		$names = array_column($metadata['dimensions'] ?? [], 'apiName');
+		$names = \array_column($metadata['dimensions'] ?? [], 'apiName');
 		self::assertContains('pagePath', $names);
 	}
 

@@ -76,6 +76,10 @@
 			"@putenv XDEBUG_MODE=coverage",
 			"vendor/bin/phpunit --testsuite unit --coverage-html build/coverage"
 		],
+		"coverage-paths": [
+			"@putenv XDEBUG_MODE=coverage",
+			"vendor/bin/phpunit --testsuite unit --path-coverage --coverage-text"
+		],
 		"fulltest": [
 			"@fix",
 			"@stan",

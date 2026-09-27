@@ -104,7 +104,7 @@ jobs:
         run: composer install --no-progress --prefer-dist --optimize-autoloader
 
       - name: Measure unit test coverage
-        run: XDEBUG_MODE=coverage vendor/bin/phpunit --testsuite unit --coverage-text --coverage-clover build/coverage/clover.xml --coverage-html build/coverage/html
+        run: XDEBUG_MODE=coverage vendor/bin/phpunit --testsuite unit --path-coverage --coverage-text --coverage-clover build/coverage/clover.xml --coverage-html build/coverage/html
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

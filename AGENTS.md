@@ -6,6 +6,9 @@
 - **All Unit Tests**: `vendor/bin/phpunit --testsuite unit` (or `composer unittest`) - runs all unit tests
 - **Test Filter**: `vendor/bin/phpunit --testsuite unit --filter <test function, class, or directory>`
 - **Coverage**: `composer coverage` (text) / `composer coverage-html` (HTML in `build/coverage`); phpunit.xml declares `src/` as the coverage source and the scripts set `XDEBUG_MODE`. Narrow a run with `--filter` and `--coverage-filter`.
+- **Path (branch) coverage, filtered**: `composer coverage-paths` runs the unit suite with `--path-coverage`, the same branch list CI's `coverage` job reports. Over the whole suite Xdebug's path coverage takes very long (the order of an hour); over one class and its own test class it takes seconds and reproduces CI's branch list for that class exactly. Pass the filters after `--`:
+  `composer coverage-paths -- --filter GAnalyticsModuleTest --coverage-filter src/GAnalyticsModule.php`
+  Use this to find the uncovered branch CI names before adding the test for it; run the full script only when closing out.
 - **Live tests**: `composer livetest` (`vendor/bin/phpunit --testsuite live`) talks to a real GA4 property; every test skips without `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `GA4_PROPERTY_ID` and `GA4_SERVICE_ACCOUNT_JSON`. CI supplies them as repository secrets on pushes.
 - **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/` and `app-gtm/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
 
@@ -154,7 +157,7 @@ Docblocks inform and describe; it is not persuasive writing.
 - Use mock objects where appropriate; inject `TMockClock` instead of sleeping when a test depends on elapsed time
 - Tests should be isolated from each other (no shared state): remove the application parameters a test adds, restore the service and the application
 - When unit testing one or cluster of classes, only run the unit tests for that class or cluster/directory.
-- NEVER add/change phpunit command options when unit testing; only run project unit tests as specified. Measuring coverage is the exception: use the `composer coverage` scripts.
+- NEVER add/change phpunit command options when unit testing; only run project unit tests as specified. Measuring coverage is the exception: use the `composer coverage` scripts, with `--filter` and `--coverage-filter` after `--` to narrow `composer coverage-paths` to one class (see Running Tests).
 - phpunit DOES NOT have the cli option "--verbose"
 
 ## Development Environment

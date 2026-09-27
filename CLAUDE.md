@@ -30,6 +30,6 @@ composer unittest   # vendor/bin/phpunit --testsuite unit
 npx playwright test --project=chromium   # end-to-end (PW_CHROMIUM=<binary> when Playwright's Chromium is not installed)
 ```
 
-`composer fulltest` runs the last three PHP checks in order. `composer coverage` / `composer coverage-html` measure coverage (Xdebug). `composer livetest` runs the live suite against Google when the `GA4_*` variables are set.
+`composer fulltest` runs the last three PHP checks in order. `composer coverage` / `composer coverage-html` measure coverage (Xdebug). `composer coverage-paths -- --filter <TestClass> --coverage-filter src/<Class>.php` gives CI's branch list for one class in seconds; the unfiltered run takes about an hour. `composer livetest` runs the live suite against Google when the `GA4_*` variables are set.
 
 See [AGENTS.md](AGENTS.md) for the full coding standards, framework conventions, and safeguards.

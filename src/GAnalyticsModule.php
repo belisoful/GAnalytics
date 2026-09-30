@@ -30,8 +30,15 @@ use Prado\Web\HttpHeaders\THttpHeaderCsp;
 use Prado\Web\HttpHeaders\THttpHeadersManager;
 use Prado\Web\Javascripts\TJavaScript;
 use Prado\Web\Services\TPageService;
+use Prado\Web\UI\JuiControls\TJuiAutoComplete;
 use Prado\Web\UI\TPage;
+use Prado\Web\UI\WebControls\TDataGrid;
 use Prado\Web\UI\WebControls\TLiteral;
+use Prado\Web\UI\WebControls\TMultiView;
+use Prado\Web\UI\WebControls\TPager;
+use Prado\Web\UI\WebControls\TTabPanel;
+use Prado\Web\UI\WebControls\TWebControl;
+use Prado\Web\UI\WebControls\TWizard;
 use Prado\Xml\TXmlElement;
 
 /**
@@ -88,7 +95,17 @@ use Prado\Xml\TXmlElement;
  * the Measurement Protocol from {@see TApplication::onError}; {@see setTrackLogins() TrackLogins}
  * queues `login`, `login_failed` and `logout` from every {@see TAuthManager};
  * {@see setTrackValidationErrors() TrackValidationErrors} queues a `form_error` event for a
- * postback whose validators failed.
+ * postback whose validators failed. {@see setTrackControls() TrackControls} attaches
+ * {@see GAnalyticsControlBehavior} to wizards, multi views, tab panels, grids, pagers and
+ * auto-completes, whose steps, views, pages and searches become events or virtual page views
+ * ({@see trackVirtualPageView()}).
+ *
+ * **Browser clicks.** With {@see setTrackClicks() TrackClicks} a page carries a listener
+ * ({@see getClickScript()}) that sends the event of every element with a `data-ga-event`
+ * attribute; {@see setClickEvent()} sets the attributes on a control.
+ *
+ * **Ecommerce.** {@see trackEcommerce()} and {@see sendEcommerce()} check a GA4 ecommerce event
+ * ({@see GAnalyticsEcommerce}) before it is queued or sent; items are {@see GAnalyticsItem}s or arrays.
  *
  * **Consent.** {@see setConsentProvider() ConsentProvider} names an {@see IGAnalyticsConsentProvider}
  * (a module id or an instance) whose state for the visitor overrides the configured defaults in
@@ -119,7 +136,9 @@ use Prado\Xml\TXmlElement;
  * (an {@see IGAnalyticsCredentials}, a module id, or a `<credentials>` element). {@see pollRealtime()}
  * runs the {@see setRealtimeMetrics() RealtimeMetrics} report and raises {@see onRealtimeReport},
  * for a `TCronModule` job (`task="belisoful/ganalytics->pollRealtime"`) that publishes live
- * figures through the application's own channel.
+ * figures through the application's own channel. {@see runCachedReport()} shares a report through
+ * the application cache; {@see GAnalyticsReportDataSource} and {@see GAnalyticsRealtimeCounter}
+ * put reports into templates. {@see deleteUserData()} asks Google to delete a user's data.
  *
  * **Framework services.** With {@see setAmendCsp() AmendCsp} (the default) the module adds
  * Google's hosts to the `script-src`, `connect-src` and `img-src` directives of every
@@ -186,8 +205,32 @@ class GAnalyticsModule extends TPluginModule
 	/** The global function a page without the tag carries in basic mode, and its script key. */
 	public const LOADER_FUNCTION = 'pradoGAnalyticsLoadTag';
 
+	/** The prefix of the application cache keys of {@see runCachedReport()}. */
+	public const CACHE_KEY_PREFIX = 'belisoful/ganalytics:report:';
+
 	/** The longest GA4 event parameter value, in characters. */
 	public const PARAM_MAX_LENGTH = 100;
+
+	/** The key the browser helper script (click and tab tracking) is registered under. */
+	public const CLICK_SCRIPT_KEY = 'gtag-clicks';
+
+	/** The global function the browser helper script defines to send an event; tabs use `{@see CLICK_FUNCTION}Tabs`. */
+	public const CLICK_FUNCTION = 'pradoGAnalyticsSend';
+
+	/** The DOM events a `data-ga-on` attribute may name. */
+	public const CLICK_TRIGGERS = ['click', 'submit', 'change'];
+
+	/** The prefix of the names {@see GAnalyticsControlBehavior} is attached to the tracked control classes under. */
+	public const CONTROL_BEHAVIOR_NAME = 'ganalytics-controls';
+
+	/** The {@see setTrackControls() TrackControls} names and the control classes each tracks. */
+	public const CONTROL_TRACKING = [
+		'wizards' => [TWizard::class],
+		'views' => [TMultiView::class],
+		'tabs' => [TTabPanel::class],
+		'paging' => [TDataGrid::class, TPager::class],
+		'searches' => [TJuiAutoComplete::class],
+	];
 
 	/**
 	 * The accepted Measurement ID form: a one to three letter prefix (`G`, `AW`, `DC`, `GT`, `UA`), a dash,
@@ -292,6 +335,18 @@ class GAnalyticsModule extends TPluginModule
 	/** @var bool Whether a postback with failed validators queues a `form_error` event. */
 	private bool $_trackValidationErrors = false;
 
+	/** @var bool Whether pages carry the listener for `data-ga-event` attributes. */
+	private bool $_trackClicks = false;
+
+	/** @var string[] The {@see CONTROL_TRACKING} names of the tracked controls. */
+	private array $_trackControls = [];
+
+	/** @var array<string, GAnalyticsControlBehavior> The attached control behaviors, by tracking name. */
+	private array $_controlBehaviors = [];
+
+	/** @var ?array{page_location: string, page_title: string} The virtual page of a full postback, reported by the page's own `page_view`. */
+	private ?array $_virtualPage = null;
+
 	/** @var string The `method` parameter of the login events. */
 	private string $_loginMethod = self::DEFAULT_LOGIN_METHOD;
 
@@ -379,8 +434,9 @@ class GAnalyticsModule extends TPluginModule
 	 * {@see preRunPageHandler()} to the {@see TPageService::onPreRunPage} event of the running
 	 * page service (a service that is not a page service is left alone), attaches the
 	 * {@see GAnalyticsPageBehavior} ({@see attachPageBehavior()}), amends the Content Security
-	 * Policy ({@see amendCspPolicies()}), hooks {@see TApplication::onError} and the
-	 * {@see TAuthManager} events the `Track*` properties ask for, and registers the shell action
+	 * Policy ({@see amendCspPolicies()}), hooks {@see TApplication::onError}, the
+	 * {@see TAuthManager} events and the control classes the `Track*` properties ask for
+	 * ({@see attachControlBehaviors()}), and registers the shell action
 	 * with a {@see TShellApplication} ({@see registerShellAction()}).
 	 * @param mixed $sender The application raising {@see TApplication::onInitComplete}.
 	 * @param mixed $param The event parameter.
@@ -412,6 +468,7 @@ class GAnalyticsModule extends TPluginModule
 				$manager->attachEventHandler('onLogout', [$this, 'logoutHandler']);
 			}
 		}
+		$this->attachControlBehaviors();
 		$this->registerShellAction();
 	}
 
@@ -644,7 +701,8 @@ class GAnalyticsModule extends TPluginModule
 	 * ({@see registerTag()}) on a full page (a callback request renders no head and would run
 	 * the tag a second time, so it gets none), tracks failed validators
 	 * ({@see trackValidationErrors()}) with {@see getTrackValidationErrors() TrackValidationErrors},
-	 * and delivers the queued calls ({@see flushCalls()}).
+	 * and delivers the queued calls ({@see flushCalls()}). With {@see getTrackClicks() TrackClicks}
+	 * a full page also gets the browser helper script ({@see registerClickScript()}).
 	 *
 	 * In basic consent mode the consent is checked again here, after the page's events ran:
 	 *
@@ -667,6 +725,9 @@ class GAnalyticsModule extends TPluginModule
 				$this->registerTag($sender);
 			} else {
 				$this->registerTagLoader($sender);
+			}
+			if ($this->getTrackClicks()) {
+				$this->registerClickScript($sender);
 			}
 		} elseif ($granted && $this->_tagHeld) {
 			$sender->getCallbackClient()->callClientFunction(static::LOADER_FUNCTION, [$this->getTagLoaderOptions($sender)]);
@@ -1207,6 +1268,251 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	// =========================================================================
+	// Browser clicks, virtual page views and control tracking
+	// =========================================================================
+
+	/**
+	 * Registers the browser helper script ({@see getClickScript()}) on a page: in the head with a
+	 * `THead`, at the beginning of the form without one. It is registered once per page.
+	 * @param TPage $page The page.
+	 */
+	public function registerClickScript(TPage $page): void
+	{
+		$cs = $page->getClientScript();
+		if ($page->getHead() !== null) {
+			$cs->registerHeadScript(static::CLICK_SCRIPT_KEY, $this->getClickScript());
+		} else {
+			$cs->registerBeginScript(static::CLICK_SCRIPT_KEY, $this->getClickScript());
+		}
+	}
+
+	/**
+	 * Returns the browser helper script. It defines `pradoGAnalyticsSend(name, params)`, which
+	 * sends an event as `gtag('event', …)`, or as a data layer push for a container without a
+	 * Measurement ID, and does nothing while the tag is absent (basic consent mode before consent);
+	 * and `pradoGAnalyticsSendTabs(tabs)`, which tracks {@see TTabPanel} tab switches. With
+	 * {@see getTrackClicks() TrackClicks} it also listens, in the capture phase, for the elements
+	 * that carry a `data-ga-event` attribute:
+	 *
+	 * | Attribute | Meaning |
+	 * |---|---|
+	 * | `data-ga-event` | The event name |
+	 * | `data-ga-params` | The event parameters, a JSON object |
+	 * | `data-ga-on` | The DOM event that sends it: `click` (the default), `submit` or `change` |
+	 *
+	 * GA4 sends events with the beacon transport, so a click that leaves the page is delivered.
+	 * @return string The script, without `<script>` tags.
+	 */
+	public function getClickScript(): string
+	{
+		$f = static::CLICK_FUNCTION;
+		$script = "(function(w,d){if(w.{$f}){return;}var l=" . TJavaScript::quoteString($this->getDataLayerName()) . ',m=' . ($this->getUsesGtag() ? 'false' : 'true') . ';'
+			. "w.{$f}=function(n,p){p=p||{};if(m){if(w[l]&&w[l].push){var o={event:n},k;for(k in p){o[k]=p[k];}w[l].push(o);}}else if(typeof w.gtag==='function'){w.gtag('event',n,p);}};"
+			. "w.{$f}Tabs=function(t){t.forEach(function(e){var h=d.getElementById(e.tab);if(h){h.addEventListener('click',function(){var v=d.getElementById(e.view);"
+			. "if(v&&v.style.display==='none'){w.{$f}('page_view',{page_location:e.location,page_title:e.title});}},true);}});};";
+		if ($this->getTrackClicks()) {
+			$script .= "var f=function(e){var t=e.target,n,p;for(;t&&t.getAttribute;t=t.parentNode){n=t.getAttribute('data-ga-event');"
+				. "if(n&&(t.getAttribute('data-ga-on')||'click')===e.type){p={};try{p=JSON.parse(t.getAttribute('data-ga-params')||'{}')||{};}catch(x){}w.{$f}(n,p);return;}}};"
+				. "['click','submit','change'].forEach(function(y){d.addEventListener(y,f,true);});";
+		}
+		return $script . '})(window,document);';
+	}
+
+	/**
+	 * Returns the attributes that make an element send an event in the browser, for
+	 * {@see getTrackClicks() TrackClicks}: `data-ga-event`, `data-ga-params` when there are
+	 * parameters, and `data-ga-on` for a trigger other than `click`.
+	 * @param string $name The GA4 event name.
+	 * @param array<string, mixed> $params The event parameters.
+	 * @param string $on The DOM event that sends it: `click`, `submit` or `change`.
+	 * @throws TInvalidDataValueException When the event name or the trigger is not valid.
+	 * @return array<string, string> The attributes.
+	 */
+	public function getClickAttributes(string $name, array $params = [], string $on = 'click'): array
+	{
+		if (!static::isEventName($name)) {
+			throw new TInvalidDataValueException('ganalytics_event_name_invalid', $name);
+		}
+		if (!\in_array($on, static::CLICK_TRIGGERS, true)) {
+			throw new TInvalidDataValueException('ganalytics_click_trigger_invalid', $on, \implode(', ', static::CLICK_TRIGGERS));
+		}
+		$attributes = ['data-ga-event' => $name];
+		if (\count($params) > 0) {
+			$attributes['data-ga-params'] = (string) \json_encode($params, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+		}
+		if ($on !== 'click') {
+			$attributes['data-ga-on'] = $on;
+		}
+		return $attributes;
+	}
+
+	/**
+	 * Makes a control send an event in the browser: its attributes get
+	 * {@see getClickAttributes()}. A template does the same with `Attributes.data-ga-event`.
+	 * @param TWebControl $control The control.
+	 * @param string $name The GA4 event name.
+	 * @param array<string, mixed> $params The event parameters.
+	 * @param string $on The DOM event that sends it: `click`, `submit` or `change`.
+	 * @throws TInvalidDataValueException When the event name or the trigger is not valid.
+	 */
+	public function setClickEvent(TWebControl $control, string $name, array $params = [], string $on = 'click'): void
+	{
+		$attributes = $control->getAttributes();
+		foreach (['data-ga-params', 'data-ga-on'] as $attribute) {
+			$attributes->remove($attribute);
+		}
+		foreach ($this->getClickAttributes($name, $params, $on) as $attribute => $value) {
+			$attributes->add($attribute, $value);
+		}
+	}
+
+	/**
+	 * Reports a view inside the page as a page of its own: `page_location` is the page URL with
+	 * `#` and the fragment, `page_title` the page title with ` | ` and the title. On a callback a
+	 * `page_view` event is queued; on a full page the page's own `page_view` carries the virtual
+	 * page, through the tag configuration ({@see getEffectiveConfigOptions()}), so a postback
+	 * counts once. A later call in the request replaces the virtual page of a full page.
+	 * @param string $fragment The URL fragment naming the view, such as `Checkout:Payment`.
+	 * @param string $title The view's title.
+	 * @throws TInvalidDataValueException When the Measurement ID read from the application parameter is not valid.
+	 */
+	public function trackVirtualPageView(string $fragment, string $title): void
+	{
+		$page = $this->_page;
+		$virtual = [
+			'page_location' => $this->getPageLocation() . '#' . $fragment,
+			'page_title' => $this->getVirtualPageTitle($page, $title),
+		];
+		if ($page !== null && !$page->getIsCallback()) {
+			$this->_virtualPage = $virtual;
+		} else {
+			$this->queueCall(['event', 'page_view', $virtual]);
+		}
+	}
+
+	/**
+	 * @return ?array{page_location: string, page_title: string} The virtual page the full page reports, or null.
+	 */
+	public function getVirtualPage(): ?array
+	{
+		return $this->_virtualPage;
+	}
+
+	/**
+	 * @param ?TPage $page The page, or null.
+	 * @param string $title The title of the view inside the page.
+	 * @return string The page title with ` | ` and the view's title, or the view's title alone for a page without one; cut to {@see PARAM_MAX_LENGTH} characters.
+	 */
+	public function getVirtualPageTitle(?TPage $page, string $title): string
+	{
+		$pageTitle = $page === null ? '' : \trim((string) $page->getTitle());
+		return \mb_substr($pageTitle === '' ? $title : $pageTitle . ' | ' . $title, 0, static::PARAM_MAX_LENGTH);
+	}
+
+	/**
+	 * @return string The request's URL, without a fragment.
+	 */
+	public function getPageLocation(): string
+	{
+		$request = $this->getApplication()->getRequest();
+		return \explode('#', $request->getBaseUrl() . $request->getRequestUri(), 2)[0];
+	}
+
+	/**
+	 * Registers tab tracking for a {@see TTabPanel}: a tab switch in the browser sends a
+	 * `page_view` for the tab (`#<panel ID>:<view ID>`, titled by the view's caption). A click on
+	 * the open tab sends nothing.
+	 * @param TTabPanel $panel The tab panel.
+	 * @return int The number of tabs tracked.
+	 */
+	public function registerTabTracking(TTabPanel $panel): int
+	{
+		$page = $panel->getPage();
+		$tabs = [];
+		foreach ($panel->getViews() as $view) {
+			$caption = \trim((string) $view->getCaption());
+			$tabs[] = [
+				'tab' => $view->getClientID() . '_0',
+				'view' => $view->getClientID(),
+				'location' => $this->getPageLocation() . '#' . $panel->getID() . ':' . $view->getID(),
+				'title' => $this->getVirtualPageTitle($page, $caption === '' ? (string) $view->getID() : $caption),
+			];
+		}
+		$this->registerClickScript($page);
+		$page->getClientScript()->registerEndScript(static::CLICK_SCRIPT_KEY . ':' . $panel->getClientID(), static::CLICK_FUNCTION . 'Tabs(' . TJavaScript::encode($tabs) . ');');
+		return \count($tabs);
+	}
+
+	/**
+	 * Attaches a {@see GAnalyticsControlBehavior} to the control classes of every
+	 * {@see getTrackControls() TrackControls} name, under `{@see CONTROL_BEHAVIOR_NAME}-<name>`,
+	 * once per name. Every control created afterwards reports its events.
+	 * @return GAnalyticsControlBehavior[] The attached behaviors, by tracking name.
+	 */
+	public function attachControlBehaviors(): array
+	{
+		foreach ($this->getTrackControls() as $kind) {
+			if (isset($this->_controlBehaviors[$kind])) {
+				continue;
+			}
+			$behavior = new GAnalyticsControlBehavior($this, $kind);
+			foreach (static::CONTROL_TRACKING[$kind] as $class) {
+				TComponent::attachClassBehavior(static::CONTROL_BEHAVIOR_NAME . '-' . $kind, $behavior, $class);
+			}
+			$this->_controlBehaviors[$kind] = $behavior;
+		}
+		return $this->_controlBehaviors;
+	}
+
+	/**
+	 * Detaches the control behaviors {@see attachControlBehaviors()} attached.
+	 * @return int The number of behaviors detached.
+	 */
+	public function detachControlBehaviors(): int
+	{
+		$count = \count($this->_controlBehaviors);
+		foreach (\array_keys($this->_controlBehaviors) as $kind) {
+			foreach (static::CONTROL_TRACKING[$kind] as $class) {
+				TComponent::detachClassBehavior(static::CONTROL_BEHAVIOR_NAME . '-' . $kind, $class);
+			}
+		}
+		$this->_controlBehaviors = [];
+		return $count;
+	}
+
+	// =========================================================================
+	// Ecommerce
+	// =========================================================================
+
+	/**
+	 * Queues a GA4 ecommerce event for the page, its parameters checked and its items normalized
+	 * by {@see GAnalyticsEcommerce::params()}; see {@see trackEvent()} for the delivery.
+	 * @param string $event The ecommerce event, such as `purchase` or `add_to_cart`.
+	 * @param array<string, mixed> $params The event parameters; `items` holds {@see GAnalyticsItem}s or arrays.
+	 * @param bool $deferred Whether the event is delivered on the next page instead of this one.
+	 * @throws TInvalidDataValueException When the event or its parameters are not valid.
+	 */
+	public function trackEcommerce(string $event, array $params, bool $deferred = false): void
+	{
+		$this->trackEvent($event, GAnalyticsEcommerce::params($event, $params), $deferred);
+	}
+
+	/**
+	 * Sends a GA4 ecommerce event over the Measurement Protocol, such as a `refund` from the back
+	 * office; see {@see sendEvent()}.
+	 * @param string $event The ecommerce event.
+	 * @param array<string, mixed> $params The event parameters; `items` holds {@see GAnalyticsItem}s or arrays.
+	 * @param ?string $clientId The client id, or null for the request's cookie or a new id.
+	 * @throws TInvalidDataValueException When the event or its parameters are not valid.
+	 * @throws TConfigurationException When the Measurement ID or the {@see getApiSecret() ApiSecret} is unset.
+	 * @return bool Whether Google accepted the request.
+	 */
+	public function sendEcommerce(string $event, array $params, ?string $clientId = null): bool
+	{
+		return $this->sendEvent($event, GAnalyticsEcommerce::params($event, $params), $clientId);
+	}
+
+	// =========================================================================
 	// Data API and Admin API
 	// =========================================================================
 
@@ -1238,6 +1544,53 @@ class GAnalyticsModule extends TPluginModule
 	public function runRealtimeReport(?array $metrics = null, ?array $dimensions = null, array $extra = []): GAnalyticsReport
 	{
 		return $this->getDataApi()->runRealtimeReport(GAnalyticsDataApi::realtimeRequest($metrics ?? $this->getRealtimeMetrics(), $dimensions ?? $this->getRealtimeDimensions(), $extra));
+	}
+
+	/**
+	 * Runs a Data API report or realtime report request, shared through the application cache for
+	 * `$expire` seconds, so the controls of many visitors ({@see GAnalyticsReportDataSource},
+	 * {@see GAnalyticsRealtimeCounter}) cost one API request per period. The cache key holds the
+	 * property and the request. Without a cache module, or with `$expire` 0, the request runs every time.
+	 * @param array<string, mixed> $request The request body; see {@see GAnalyticsDataApi::reportRequest()} and {@see GAnalyticsDataApi::realtimeRequest()}.
+	 * @param bool $realtime Whether it is a realtime report.
+	 * @param int $expire The seconds the response is shared.
+	 * @throws TConfigurationException When the property id or the credentials are unset.
+	 * @throws GAnalyticsApiException When the API refuses the request.
+	 * @return GAnalyticsReport The report.
+	 */
+	public function runCachedReport(array $request, bool $realtime = false, int $expire = 0): GAnalyticsReport
+	{
+		$cache = $expire > 0 ? $this->getApplication()->getCache() : null;
+		$key = static::CACHE_KEY_PREFIX . \hash('sha256', ($realtime ? 'realtime:' : 'report:') . $this->getPropertyId() . ':' . \json_encode($request));
+		if ($cache !== null && \is_array($response = $cache->get($key))) {
+			return new GAnalyticsReport($response);
+		}
+		$api = $this->getDataApi();
+		$report = $realtime ? $api->runRealtimeReport($request) : $api->runReport($request);
+		if ($cache !== null) {
+			$cache->set($key, $report->getResponse(), $expire);
+		}
+		return $report;
+	}
+
+	/**
+	 * Finds a {@see GAnalyticsModule} of the application, for a control or a provider that names one.
+	 * @param string $id The module id; empty finds the first `GAnalyticsModule`.
+	 * @return ?GAnalyticsModule The module; null when none is found.
+	 */
+	public static function findModule(string $id = ''): ?GAnalyticsModule
+	{
+		$app = Prado::getApplication();
+		if ($id !== '') {
+			$module = $app->getModule($id);
+			return $module instanceof GAnalyticsModule ? $module : null;
+		}
+		foreach (\array_keys($app->getModulesByType(GAnalyticsModule::class)) as $moduleId) {
+			$module = $app->getModule($moduleId);   // loads a lazy module; returns a loaded one as is
+			\assert($module instanceof GAnalyticsModule);
+			return $module;
+		}
+		return null;
 	}
 
 	/**
@@ -1610,8 +1963,10 @@ class GAnalyticsModule extends TPluginModule
 	 * Returns the `gtag('config')` parameters: the {@see getConfigOptions() ConfigOptions}, with
 	 * `debug_mode` set when {@see getDebugMode() DebugMode} is on, `send_page_view` set to false
 	 * when {@see getSendPageView() SendPageView} is off, `user_id` set to the
-	 * {@see getEffectiveUserId() effective user id} when one resolves, and `content_group` set to
-	 * the page path when {@see getPagePathAsContentGroup() PagePathAsContentGroup} is on and a page is given.
+	 * {@see getEffectiveUserId() effective user id} when one resolves, `content_group` set to
+	 * the page path when {@see getPagePathAsContentGroup() PagePathAsContentGroup} is on and a page is
+	 * given, and `page_location` and `page_title` set to the virtual page of a full postback
+	 * ({@see trackVirtualPageView()}).
 	 * @param ?TPage $page The page the configuration is for, or null.
 	 * @return array<string, mixed> The configuration parameters.
 	 */
@@ -1629,6 +1984,9 @@ class GAnalyticsModule extends TPluginModule
 		}
 		if ($page !== null && $this->getPagePathAsContentGroup() && ($path = (string) $page->getPagePath()) !== '') {
 			$options['content_group'] = $path;
+		}
+		if ($this->_virtualPage !== null) {
+			$options = \array_merge($options, $this->_virtualPage);
 		}
 		return $options;
 	}
@@ -2268,5 +2626,57 @@ class GAnalyticsModule extends TPluginModule
 			throw new TConfigurationException('ganalytics_class_invalid', $class, TShellAction::class);
 		}
 		$this->_shellClass = $class;
+	}
+
+	/**
+	 * @return bool Whether pages carry the listener that sends the events of `data-ga-event` attributes. Defaults to false.
+	 */
+	public function getTrackClicks(): bool
+	{
+		return $this->_trackClicks;
+	}
+
+	/**
+	 * @param mixed $value Whether pages carry the listener that sends the events of `data-ga-event` attributes; see {@see getClickScript()}.
+	 */
+	public function setTrackClicks($value)
+	{
+		$this->_trackClicks = TPropertyValue::ensureBoolean($value);
+	}
+
+	/**
+	 * @return string[] The tracked controls: names of {@see CONTROL_TRACKING}. Defaults to none.
+	 */
+	public function getTrackControls(): array
+	{
+		return $this->_trackControls;
+	}
+
+	/**
+	 * Sets the controls whose events are tracked ({@see GAnalyticsControlBehavior}):
+	 *
+	 * | Name | Controls | Events |
+	 * |---|---|---|
+	 * | `wizards` | `TWizard` | `wizard_step`, `wizard_complete`, `wizard_cancel` |
+	 * | `views` | `TMultiView`, `TActiveMultiView` | a virtual `page_view` per view change on a postback or callback |
+	 * | `tabs` | `TTabPanel` | a virtual `page_view` per tab switch in the browser |
+	 * | `paging` | `TDataGrid`, `TPager` and their active versions | `view_item_list` per page change |
+	 * | `searches` | `TJuiAutoComplete` | `search` per selected suggestion |
+	 * @param mixed $value The names, as an array or a comma-separated string; `all` for every one; empty for none.
+	 * @throws TInvalidDataValueException When a name is not one of {@see CONTROL_TRACKING}.
+	 */
+	public function setTrackControls($value)
+	{
+		$names = \is_array($value) ? $value : \explode(',', (string) TPropertyValue::ensureString($value));
+		$names = \array_values(\array_filter(\array_map(fn ($name) => \strtolower(\trim((string) $name)), $names), fn ($name) => $name !== ''));
+		if (\in_array('all', $names, true)) {
+			$names = \array_keys(static::CONTROL_TRACKING);
+		}
+		foreach ($names as $name) {
+			if (!isset(static::CONTROL_TRACKING[$name])) {
+				throw new TInvalidDataValueException('ganalytics_track_controls_invalid', $name, \implode(', ', \array_keys(static::CONTROL_TRACKING)));
+			}
+		}
+		$this->_trackControls = \array_values(\array_unique($names));
 	}
 }

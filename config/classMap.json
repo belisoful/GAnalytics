@@ -14,5 +14,11 @@
 	"IGAnalyticsConsentStore": "belisoful\\GAnalytics\\IGAnalyticsConsentStore",
 	"GAnalyticsCookieConsentProvider": "belisoful\\GAnalytics\\GAnalyticsCookieConsentProvider",
 	"GAnalyticsPrivacyConsentProvider": "belisoful\\GAnalytics\\GAnalyticsPrivacyConsentProvider",
-	"GAnalyticsPersonalDataProvider": "belisoful\\GAnalytics\\GAnalyticsPersonalDataProvider"
+	"GAnalyticsPersonalDataProvider": "belisoful\\GAnalytics\\GAnalyticsPersonalDataProvider",
+	"GAnalyticsControlBehavior": "belisoful\\GAnalytics\\GAnalyticsControlBehavior",
+	"GAnalyticsItem": "belisoful\\GAnalytics\\GAnalyticsItem",
+	"GAnalyticsEcommerce": "belisoful\\GAnalytics\\GAnalyticsEcommerce",
+	"GAnalyticsReportDataSource": "belisoful\\GAnalytics\\GAnalyticsReportDataSource",
+	"GAnalyticsReportDataSourceView": "belisoful\\GAnalytics\\GAnalyticsReportDataSourceView",
+	"GAnalyticsRealtimeCounter": "belisoful\\GAnalytics\\GAnalyticsRealtimeCounter"
 }

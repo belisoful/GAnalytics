@@ -53,3 +53,7 @@ tests/playwright/app-basic/assets/*
 !tests/playwright/app-basic/assets/.gitkeep
 tests/playwright/app-basic/protected/runtime/*
 !tests/playwright/app-basic/protected/runtime/.gitkeep
+tests/playwright/app-controls/assets/*
+!tests/playwright/app-controls/assets/.gitkeep
+tests/playwright/app-controls/protected/runtime/*
+!tests/playwright/app-controls/protected/runtime/.gitkeep

@@ -5,7 +5,7 @@ All notable changes to `belisoful/ganalytics` are recorded here. The format foll
 
 ## [Unreleased]
 
-The next release is 0.2.0. It brings the extension to PRADO 4.4 and its current extension conventions, and lands the audit recorded in `agents/working/AUDIT_2026-09-26.md`. It changes the package requirements and some behavior; see [Upgrading from 0.0.1](#upgrading-from-001).
+The next release is 0.1.0. It brings the extension to PRADO 4.4 and its current extension conventions, and lands the audit recorded in `agents/working/AUDIT_2026-09-26.md`. It changes the package requirements and some behavior; see [Upgrading from 0.0.1](#upgrading-from-001).
 
 ### Added
 - `Enabled`: `false` leaves every page without the tag.
@@ -42,6 +42,13 @@ The next release is 0.2.0. It brings the extension to PRADO 4.4 and its current 
 - `GAnalyticsModule::getUserIdForName()`: the `user_id` `UserIdFromUser` derives for any user name.
 - `GAnalyticsPersonalDataProvider`: the `belisoful/prado-privacy` data subject rights and records of processing for Google Analytics. Erasure submits a user deletion for each of the subject's identifiers (the derived `user_id`, `ga_user_id`, `ga_client_id` and `ga_app_instance_id` identifiers, the requester's `_ga` cookie, and the email with `EraseUserProvidedData`); export lists the identifiers; rectification is not possible. `getProcessingActivities()` declares Google Analytics (consent, Google as recipient, the transfer to the United States, the property's retention), with `Activity` overriding any field. `belisoful/prado-privacy` is a development dependency, not a requirement.
 - `GAnalyticsApiClient::requestUrl()`: a request to an absolute URL, for another API version.
+- Click tracking: `TrackClicks` puts a listener on every page that sends the events of elements with `data-ga-event` (`data-ga-params`, `data-ga-on` for `click`, `submit` or `change`), as `gtag('event')` or a data layer push, and not while the tag is absent; `getClickScript()`, `registerClickScript()`, `getClickAttributes()`, `setClickEvent()`.
+- Control tracking: `TrackControls` (`wizards`, `views`, `tabs`, `paging`, `searches`, `all`) attaches `GAnalyticsControlBehavior` to `TWizard` (`wizard_step`, `wizard_complete`, `wizard_cancel`), `TMultiView` (a virtual page view per view change: a `page_view` event on a callback, the page's own `page_view` on a postback), `TTabPanel` (a virtual page view per tab switch in the browser), `TDataGrid` and `TPager` (`view_item_list`), and `TJuiAutoComplete` (`search`); `attachControlBehaviors()`, `detachControlBehaviors()`, `trackVirtualPageView()`, `getVirtualPage()`, `getVirtualPageTitle()`, `getPageLocation()`, `registerTabTracking()`.
+- Ecommerce: `GAnalyticsEcommerce::params()` checks and normalizes the GA4 ecommerce events (items, `transaction_id`, `currency` with `value`, numbers), `GAnalyticsItem` holds an item's parameters; `trackEcommerce()` on the module and the page behavior, `sendEcommerce()` over the Measurement Protocol.
+- `GAnalyticsReportDataSource` (with `GAnalyticsReportDataSourceView`): a data source control a data control binds to by `DataSourceID` (`Metrics`, `Dimensions`, `StartDate`, `EndDate`, `OrderBy`, `Limit`, `Realtime`, `RequestOptions`, `CacheExpire`, `AnalyticsModule`).
+- `GAnalyticsRealtimeCounter`: an active control showing a realtime metric, refreshed by callback every `Interval` seconds (`Metric`, `Format`, `CacheExpire`, `ErrorText`, `CssClass`, `AnalyticsModule`).
+- `runCachedReport()`: a report shared through the application cache for a number of seconds; `findModule()`: the application's analytics module by id or type.
+- End-to-end application `tests/playwright/app-controls` and `controls.spec.js` for the listener, tabs, views, wizard, paging and the counter.
 
 ### Changed
 - Requires PHP 8.1+ and PRADO `^4.4@dev`. The bootstrap class is declared under `extra.prado.bootstrap`.

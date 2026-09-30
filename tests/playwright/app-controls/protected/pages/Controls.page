@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<com:THead Title="Controls" />
+<body>
+<com:TForm>
+	<h1>Controls</h1>
+
+	<p>
+		<com:THyperLink ID="download" NavigateUrl="#download" Text="Download spec"
+			Attributes.data-ga-event="file_download" Attributes.data-ga-params='{"file_name": "spec.pdf"}' />
+		<a href="#plain" data-ga-event="select_content"><span>Plain link</span></a>
+		<select id="size" data-ga-event="select_size" data-ga-on="change"><option>S</option><option>M</option></select>
+		<com:TLinkButton ID="coded" Text="Coded link" />
+	</p>
+
+	<com:TTabPanel ID="Tabs">
+		<com:TTabView ID="Profile" Caption="Profile">Profile content</com:TTabView>
+		<com:TTabView ID="Billing" Caption="Billing">Billing content</com:TTabView>
+	</com:TTabPanel>
+
+	<com:TActiveMultiView ID="Views" ActiveViewIndex="0">
+		<com:TView ID="First">First view</com:TView>
+		<com:TView ID="Second">Second view</com:TView>
+	</com:TActiveMultiView>
+	<com:TActiveButton ID="nextView" Text="Next view" OnCallback="nextView" />
+
+	<com:TWizard ID="Checkout">
+		<com:TWizardStep ID="Address" Title="Address">Address step</com:TWizardStep>
+		<com:TWizardStep ID="Payment" Title="Payment">Payment step</com:TWizardStep>
+	</com:TWizard>
+
+	<com:TDataGrid ID="Orders" AllowPaging="true" PageSize="2" OnPageIndexChanged="changePage" PagerStyle.Mode="Numeric" />
+
+	<p>Active now: <com:GAnalyticsRealtimeCounter ID="Live" Interval="1" ErrorText="n/a" Format="{0} active" /></p>
+</com:TForm>
+</body>
+</html>

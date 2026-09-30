@@ -45,51 +45,9 @@ class InitializedTestApplication extends TApplication
 	}
 }
 
-/** A page that reports a callback request, with one callback client the test can inspect. */
-class CallbackPage extends TPage
-{
-	public TCallbackClientScript $client;
-
-	public function __construct()
-	{
-		$this->client = new TCallbackClientScript();
-		parent::__construct();
-	}
-
-	public function getIsCallback()
-	{
-		return true;
-	}
-
-	public function getCallbackClient()
-	{
-		return $this->client;
-	}
-}
-
-/** A page whose THead is attached by the test without rendering. */
-class HeadedPage extends TPage
-{
-	public function attachHead(): THead
-	{
-		$head = new THead();
-		$this->setHead($head);
-		return $head;
-	}
-}
-
 /** A service that is not a page service, so the module must leave it alone. */
 class OtherService extends TService
 {
-}
-
-/** A page that reports a postback, for the validation tracking. */
-class PostBackPage extends TPage
-{
-	public function getIsPostBack()
-	{
-		return true;
-	}
 }
 
 class GAnalyticsModuleTest extends TestCase

@@ -23,6 +23,7 @@ use Prado\Web\UI\TPage;
  * ```php
  * $this->trackEvent('sign_up', ['method' => 'form']);          // on the rendered page
  * $this->trackEvent('login', ['method' => 'form'], true);       // on the next page, after a redirect
+ * $this->trackEcommerce('add_to_cart', ['items' => [['item_id' => 'SKU-1']]]);
  * $this->updateConsent(['analytics_storage' => 'granted']);
  * $this->setUserProperties(['plan' => 'pro']);
  * $this->gtag('event', 'tutorial_begin');
@@ -89,6 +90,18 @@ class GAnalyticsPageBehavior extends TClassBehavior
 	public function setUserProperties($page, array $properties, bool $deferred = false): void
 	{
 		$this->_module->setUserProperties($properties, $deferred);
+	}
+
+	/**
+	 * Queues a GA4 ecommerce event; see {@see GAnalyticsModule::trackEcommerce()}.
+	 * @param TPage $page The page the method is called on.
+	 * @param string $event The ecommerce event, such as `purchase`.
+	 * @param array<string, mixed> $params The event parameters; `items` holds {@see GAnalyticsItem}s or arrays.
+	 * @param bool $deferred Whether the event is delivered on the next page instead of this one.
+	 */
+	public function trackEcommerce($page, string $event, array $params, bool $deferred = false): void
+	{
+		$this->_module->trackEcommerce($event, $params, $deferred);
 	}
 
 	/**

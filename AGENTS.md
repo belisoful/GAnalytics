@@ -12,7 +12,7 @@
   Use this to find the uncovered branch CI names before adding the test for it; run the full script only when closing out. `composer coverage-paths` is the same run with phpunit's text summary instead of the list.
 - **Native functions are fully qualified** (`\trim()`, `\in_array()`, …; php-cs-fixer's `native_function_invocation`, applied by `composer fix`). PHP 8.4 compiles an unqualified native call in namespaced code to a frameless call guarded by a namespace-fallback check; the fallback is a branch that never executes and shows as uncovered in path coverage. A qualified call compiles to the direct call with no branch.
 - **Live tests**: `composer livetest` (`vendor/bin/phpunit --testsuite live`) talks to a real GA4 property; every test skips without `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `GA4_PROPERTY_ID` and `GA4_SERVICE_ACCOUNT_JSON`. CI supplies them as repository secrets on pushes.
-- **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/`, `app-gtm/` and `app-basic/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
+- **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/`, `app-gtm/`, `app-basic/` and `app-controls/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
 
 ### Linting and Code Analysis
 - **PHPStan Analysis**: `vendor/bin/phpstan analyse --memory-limit=1G` (or `composer stan`); level 3, `phpVersion` range 8.1 – 8.5
@@ -60,7 +60,7 @@
   - `@method` for dynamic events with prefix 'dy-'; which are called (on "$this->dy-") but not defined.
 - Inline comments should be in English and start with `//`
 - Use `?` for single nullable types and in doc blocks
-- `@since`: symbols released through 0.2.0 carry none; a public symbol added after 0.2.0 gets `@since` with the version it ships in.
+- `@since`: symbols released through 0.1.0 carry none; a public symbol added after 0.1.0 gets `@since` with the version it ships in.
 - Method Doc Blocks must be **tight**, and have at minimum one sentence in the description.
 - Documentation additions/changes/removals should be integrated into the whole, at each level (of detail).
 
@@ -126,6 +126,10 @@ Docblocks inform and describe; it is not persuasive writing.
 - `TShellApplication::addShellActionClass(['class' => …, 'Module' => $this])` creates the action with `Prado::createComponent()` and sets the `Module` property; the module registers it at hook time, before `processArguments()` installs the built-in actions.
 - `belisoful/prado-privacy` is a `require-dev` dependency (a VCS repository in `composer.json`), never a requirement. `GAnalyticsPrivacyConsentProvider` references none of its classes; `GAnalyticsPersonalDataProvider` implements its `IPersonalDataProvider` and `IProcessingActivityProvider` (`TPrivacyModule` and `TProcessingRegistry` discover providers with `instanceof`), so it loads only where the package is installed, and no other class references it.
 - GA4 user deletion is the Admin API v1alpha `properties/{id}:submitUserDeletion` (scope `analytics.edit`); the Universal Analytics User Deletion API is retired. `GAnalyticsAdminApi::getAlphaBaseUrl()` derives the v1alpha base from the v1beta `BaseUrl`.
+- Class behaviors share one instance across owners, and `TComponent::__set` forwards a property to a behavior without its owner, so a class behavior cannot carry per-control properties: click tracking uses `data-ga-*` attributes (`Attributes.data-ga-event` in a template). `GAnalyticsControlBehavior::events()` differ per tracking name, so the module attaches one instance per name. `TBaseBehavior::getStrictEvents()` is true, so a behavior's events must exist on every class it is attached to.
+- `TMultiView::activateView()` raises `onActiveViewChanged` on a page's first (GET) request too; the control behavior reports view changes and wizard steps only on a postback or callback. `TTabPanel` switches tabs in the browser with no server event; the tab tracking listens on each tab header (`<view client ID>_0`) in the capture phase and reports only when the view is hidden (`style.display === 'none'`).
+- A template names a PSR-4 class by its class-map short name (`<com:GAnalyticsRealtimeCounter>`): `Prado::using()` finds a namespaced class only when it is already loaded or in the class map. An installed package's class map is registered by Composer; `tests/playwright/app-controls/index.php` registers `config/classMap.json` with `Prado::registerClassMap()`.
+- `THttpRequest::getBaseUrl()` and `getRequestUri()` give the page location; under the phpunit CLI the request URI has no leading `/`, so tests compare with the two values, not a literal.
 - `TCronModule` runs `task="belisoful/ganalytics->pollRealtime"` (`TCronMethodTask`); the Data API has no push channel.
 - Modules configured in the application initialize before `onInitComplete`; a lazily loaded module initializes later, when `TApplication::hasStateFlag(TApplication::STATE_INITIALIZED)` is already true. `init()` handles both.
 - Framework core updates 'framework/classes.php' with new classes; this does NOT apply to this extension (see the PSR-4 / class-map note below).
@@ -133,11 +137,11 @@ Docblocks inform and describe; it is not persuasive writing.
 - UI Portlets are PHP classes with a ".tpl" TTemplate file with the same base name
 - Head scripts (`registerHeadScriptFile`/`registerHeadScript`) render only through `THead`; form scripts (`registerScriptFile`/`registerBeginScript`/`registerEndScript`) render in the form, and begin scripts also render in a callback response. Time is read through PRADO's clock seam (`TApplicationClockAwareTrait`), never `time()` directly.
 - Logging goes through `Prado::log()` with `\Prado\Util\Log\TLogger` levels (the logger moved to `Prado\Util\Log` in PRADO 4.4).
-- The public API is settling for 0.2.0: prefer compatible changes, and document any breaking change under "Upgrading" in `CHANGELOG.md`
+- The public API is settling for 0.1.0: prefer compatible changes, and document any breaking change under "Upgrading" in `CHANGELOG.md`
 - Record every user-visible change under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format) as it lands
 - A full check consists of the 4 checks (in order): `php -l` compile, php-cs-fixer, phpstan, phpunit (all checks must pass successfully); before a release, `composer coverage-branches` with no unexecuted branch and `npx playwright test --project=chromium`
 - A full check must be done for code to be ready for git commit.
-- The current version of this extension is **v0.1.0**; the work on `main` is the next release, **0.2.0** (unreleased). It targets PRADO 4.4+ (the `pradosoft/prado` `master` branch, aliased `4.4.x-dev`). Release history and upgrade notes are in `CHANGELOG.md`.
+- The released version of this extension is **v0.0.1**; the work on `main` is the next release, **v0.1.0** (unreleased). It targets PRADO 4.4+ (the `pradosoft/prado` `master` branch, aliased `4.4.x-dev`). Release history and upgrade notes are in `CHANGELOG.md`.
 - This extension namespaces its class under `belisoful\GAnalytics` (PSR-4 → `src/`); extensions do NOT update the framework's `classes.php`. The Prado3 short class name is supplied via `config/classMap.json`, registered by Composer from `composer.json` `extra.prado.class-map`. The bootstrap module is `extra.prado.bootstrap`, so `<module id="belisoful/ganalytics"/>` configures it without a class.
 - Error codes (keys) and their messages live in `config/errorMessages.txt`, registered by Composer from `composer.json` `extra.prado.error-messages`; the framework's `messages.txt` is not used. `TPluginModule` also looks for an `errorMessages.txt` next to the module class (`src/`); this extension keeps the file under `config/` and relies on Composer.
 
@@ -150,7 +154,7 @@ Docblocks inform and describe; it is not persuasive writing.
   - Helper classes in their own file must not end in `Test`; phpunit collects `*Test.php` files as tests.
   - Global classes are written with a leading backslash inside the test namespace (`new \stdClass()`).
 - `tests/test_tools/phpunit_bootstrap.php` registers the error messages, defines `PRADO_TEST_RUN` (so a test may construct another `TApplication`), and constructs a `TApplication` on `tests/unit/app` without running it. A test that needs a page sets a `TPageService` as the application's service (`TPage::getClientScript()` asks the service for its manager class) and restores the previous service in `tearDown()`.
-- Shared fixtures live in their own files: `ProbeGAnalyticsModule` (an `\ArrayObject` deferred store; recording Measurement Protocol, Data API and Admin API clients), `RecordingTransportTrait` (records `transport()` calls, answers from a queue) with `RecordingDataApi`, `RecordingAdminApi`, `RecordingServiceAccountCredentials`, `RecordingMeasurementProtocol` (records `post()`), `FakeUser` (an `IUser`), `FakeSession` (a `THttpSession` over an array), `FakeCredentialsModule`, `FakeConsentModule`, `RecordingResponse` (records cookies). Network, PHP sessions and randomness never reach a unit test; a service account test generates its own RSA key with `openssl_pkey_new()`.
+- Shared fixtures live in their own files: `ProbeGAnalyticsModule` (an `\ArrayObject` deferred store; recording Measurement Protocol, Data API and Admin API clients), `RecordingTransportTrait` (records `transport()` calls, answers from a queue) with `RecordingDataApi`, `RecordingAdminApi`, `RecordingServiceAccountCredentials`, `RecordingMeasurementProtocol` (records `post()`), `FakeUser` (an `IUser`), `FakeSession` (a `THttpSession` over an array), `FakeCredentialsModule`, `FakeConsentModule`, `RecordingResponse` (records cookies), `CallbackPage` (a callback page with an inspectable callback client), `HeadedPage` (a page with a `THead` attached in code), `PostBackPage` (a postback page). Tests that look up "the first" module, or use the application cache, snapshot and restore `TApplication::$_modules` and `$_cache` (`GAnalyticsTrackingTest`, `GAnalyticsReportControlsTest`), since other test classes leave modules and a cache behind. Network, PHP sessions and randomness never reach a unit test; a service account test generates its own RSA key with `openssl_pkey_new()`.
 - The phpunit bootstrap creates the default response module and closes its output buffer, so no test is flagged risky for a buffer PRADO opened.
 - Live tests (`tests/live`, namespace `belisoful\GAnalytics\Test\Live`, `LiveTestCase`) read the `GA4_*` environment and skip without it; they are the only tests that reach Google.
 - Playwright specs (`tests/playwright/*.spec.js`) use `helpers.js`: `stubGoogle(page)` answers Google's hosts locally, `dataLayer(page)` and `gtagCalls(page)` read the page's data layer. A spec never depends on Google being reachable.
@@ -194,11 +198,15 @@ Docblocks inform and describe; it is not persuasive writing.
 │   ├── IGAnalyticsCredentials.php          # Token seam; GAnalyticsServiceAccountCredentials.php, GAnalyticsAccessTokenCredentials.php
 │   ├── IGAnalyticsConsentProvider.php      # Consent seam; IGAnalyticsConsentStore.php, GAnalyticsCookieConsentProvider.php, GAnalyticsPrivacyConsentProvider.php (prado-privacy binding)
 │   ├── GAnalyticsPersonalDataProvider.php  # prado-privacy IPersonalDataProvider (user deletion) and IProcessingActivityProvider
+│   ├── GAnalyticsControlBehavior.php       # TClassBehavior on TWizard, TMultiView, TTabPanel, TDataGrid, TPager, TJuiAutoComplete (TrackControls)
+│   ├── GAnalyticsReportDataSource.php      # Data source control for a report; GAnalyticsReportDataSourceView.php is its view
+│   ├── GAnalyticsRealtimeCounter.php       # TTimeTriggeredCallback showing a realtime metric
+│   ├── GAnalyticsEcommerce.php             # GA4 ecommerce event rules; GAnalyticsItem.php is an item
 │   ├── GAnalyticsHttpTransportTrait.php    # The one HTTP transport seam
 │   └── GAnalyticsShellAction.php           # prado-cli ganalytics/*
 ├── tests/
 │   ├── live/                   # phpunit tests against a real property; namespace belisoful\GAnalytics\Test\Live; skip without GA4_* variables
-│   ├── playwright/             # Browser end-to-end specs, helpers, and the app/, app-gtm/ and app-basic/ PRADO applications they drive
+│   ├── playwright/             # Browser end-to-end specs, helpers, and the app/, app-gtm/, app-basic/ and app-controls/ PRADO applications they drive
 │   ├── test_tools/             # phpunit and phpstan bootstraps
 │   └── unit/                   # phpunit tests and fixtures; namespace belisoful\GAnalytics\Test\Unit (autoload-dev PSR-4)
 │       └── app/                # The minimal application the tests construct

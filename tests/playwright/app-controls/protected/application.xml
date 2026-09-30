@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<application id="ganalytics-e2e-controls" Mode="Debug">
+	<modules>
+		<!-- A fixed key: the CSP nonce is read before the application state loads (see app/). -->
+		<module id="security" class="TSecurityManager" ValidationKey="e2e-controls-key-not-a-secret" />
+		<module id="response" class="THttpResponse" HeadersManager="headers" />
+		<module id="headers" class="Prado\Web\HttpHeaders\THttpHeadersManager" ReportOnly="false">
+			<header class="Prado\Web\HttpHeaders\THttpHeaderCsp">
+				<policy Name="default-src">'self' NONCE</policy>
+				<policy Name="style-src">'self' 'unsafe-inline'</policy>
+			</header>
+		</module>
+		<module id="ganalytics" class="belisoful\GAnalytics\GAnalyticsModule" MeasurementId="G-E2ETEST123"
+			TrackClicks="true" TrackControls="all" />
+	</modules>
+	<services>
+		<service id="page" class="TPageService" DefaultPage="Controls" />
+	</services>
+</application>

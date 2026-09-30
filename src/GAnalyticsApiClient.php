@@ -69,11 +69,25 @@ abstract class GAnalyticsApiClient extends TComponent
 	 */
 	public function request(string $method, string $path, ?array $body = null, array $query = []): array
 	{
+		return $this->requestUrl($method, $this->getBaseUrl() . '/' . \ltrim($path, '/'), $body, $query);
+	}
+
+	/**
+	 * Sends a JSON request with the bearer token to an absolute URL and returns the decoded response.
+	 * @param string $method The HTTP method.
+	 * @param string $url The absolute URL, such as another API version's endpoint.
+	 * @param ?array<string, mixed> $body The JSON body, or null for none.
+	 * @param array<string, mixed> $query Query parameters.
+	 * @throws TConfigurationException When no credentials are set.
+	 * @throws GAnalyticsApiException When the status is not 2xx or the response is not a JSON object.
+	 * @return array<string, mixed> The decoded response.
+	 */
+	protected function requestUrl(string $method, string $url, ?array $body = null, array $query = []): array
+	{
 		$credentials = $this->getCredentials();
 		if ($credentials === null) {
 			throw new TConfigurationException('ganalytics_credentials_unconfigured', static::class);
 		}
-		$url = $this->getBaseUrl() . '/' . \ltrim($path, '/');
 		if (\count($query) > 0) {
 			$url .= '?' . \http_build_query($query);
 		}

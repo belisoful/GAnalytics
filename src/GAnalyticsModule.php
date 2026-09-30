@@ -1301,6 +1301,26 @@ class GAnalyticsModule extends TPluginModule
 	}
 
 	/**
+	 * Asks Google to delete a user's data from the {@see getPropertyId() PropertyId} through
+	 * {@see GAnalyticsAdminApi::submitUserDeletion()}. The credentials need
+	 * {@see GAnalyticsServiceAccountCredentials::SCOPE_EDIT} and the Editor role on the property.
+	 * @param string $id The identifier: a user id, a client id, an app instance id, or an email address or phone number.
+	 * @param string $kind The identifier kind: `userId`, `clientId`, `appInstanceId` or `userProvidedData`.
+	 * @throws TConfigurationException When the property id or the credentials are unset.
+	 * @throws TInvalidDataValueException When the kind is unknown or the identifier is empty.
+	 * @throws GAnalyticsApiException When the API refuses the request.
+	 * @return string The `deletionRequestTime`: Google deletes the data collected before it.
+	 */
+	public function deleteUserData(string $id, string $kind = 'userId'): string
+	{
+		$property = $this->getPropertyId();
+		if ($property === null) {
+			throw new TConfigurationException('ganalytics_property_unconfigured');
+		}
+		return $this->getAdminApi()->submitUserDeletion($property, $kind, $id);
+	}
+
+	/**
 	 * Creates the Admin API client; the seam a subclass or test replaces the transport through.
 	 * @return GAnalyticsAdminApi A new client.
 	 */
@@ -1637,7 +1657,19 @@ class GAnalyticsModule extends TPluginModule
 		if ($name === '') {
 			return null;
 		}
-		return \hash_hmac('sha256', $name, (string) $app->getSecurityManager()->getValidationKey());
+		return $this->getUserIdForName($name);
+	}
+
+	/**
+	 * Returns the `user_id` {@see getUserIdFromUser() UserIdFromUser} derives for a user name: the
+	 * HMAC-SHA256 of the name under the security manager's validation key. An erasure request uses
+	 * it to find a user's data after the user is gone.
+	 * @param string $name The user name.
+	 * @return string The derived user id.
+	 */
+	public function getUserIdForName(string $name): string
+	{
+		return \hash_hmac('sha256', $name, (string) $this->getApplication()->getSecurityManager()->getValidationKey());
 	}
 
 	// =========================================================================

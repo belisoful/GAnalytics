@@ -844,6 +844,35 @@ class GAnalyticsModuleTest extends TestCase
 		self::assertSame('0', $module->getEffectiveUserId());
 	}
 
+	public function testUserIdForNameIsTheDerivedUserId()
+	{
+		$module = $this->module();
+		$this->_app->getSecurityManager()->setValidationKey('validation-key');
+		$module->setUserIdFromUser(true);
+		$this->_app->setUser(new FakeUser('alice', false));
+		self::assertSame($module->getEffectiveUserId(), $module->getUserIdForName('alice'));
+		self::assertSame(\hash_hmac('sha256', 'bob', 'validation-key'), $module->getUserIdForName('bob'), 'Any name, logged in or not.');
+	}
+
+	public function testDeleteUserDataSubmitsToTheProperty()
+	{
+		$module = $this->probe();
+		$module->setCredentials(new GAnalyticsAccessTokenCredentials('tok'));
+		try {
+			$module->deleteUserData('u-1');
+			self::fail('no property');
+		} catch (TConfigurationException $e) {
+			self::assertSame('ganalytics_property_unconfigured', $e->getErrorCode());
+		}
+		$module->setPropertyId('properties/77');
+		$module->adminApi->answer(['deletionRequestTime' => '2026-09-29T00:00:00Z']);
+		self::assertSame('2026-09-29T00:00:00Z', $module->deleteUserData('u-1'));
+		self::assertStringEndsWith('/v1alpha/properties/77:submitUserDeletion', $module->adminApi->requests[0]['url']);
+		self::assertSame(['userId' => 'u-1'], $module->adminApi->lastBody());
+		$module->deleteUserData('1.2', 'clientId');
+		self::assertSame(['clientId' => '1.2'], $module->adminApi->lastBody());
+	}
+
 	// =========================================================================
 	// Calls
 	// =========================================================================

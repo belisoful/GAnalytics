@@ -124,6 +124,8 @@ Docblocks inform and describe; it is not persuasive writing.
 - `TAuthManager` raises `onLogin($user)`, `onLoginFailed($username)` and `onLogout($user)`; the module finds every auth manager with `getModulesByType()` and loads lazy ones.
 - `TApplication::onError($param)` carries the throwable; the error handler runs after it, so the page will not render and the `exception` event goes over the Measurement Protocol.
 - `TShellApplication::addShellActionClass(['class' => …, 'Module' => $this])` creates the action with `Prado::createComponent()` and sets the `Module` property; the module registers it at hook time, before `processArguments()` installs the built-in actions.
+- `belisoful/prado-privacy` is a `require-dev` dependency (a VCS repository in `composer.json`), never a requirement. `GAnalyticsPrivacyConsentProvider` references none of its classes; `GAnalyticsPersonalDataProvider` implements its `IPersonalDataProvider` and `IProcessingActivityProvider` (`TPrivacyModule` and `TProcessingRegistry` discover providers with `instanceof`), so it loads only where the package is installed, and no other class references it.
+- GA4 user deletion is the Admin API v1alpha `properties/{id}:submitUserDeletion` (scope `analytics.edit`); the Universal Analytics User Deletion API is retired. `GAnalyticsAdminApi::getAlphaBaseUrl()` derives the v1alpha base from the v1beta `BaseUrl`.
 - `TCronModule` runs `task="belisoful/ganalytics->pollRealtime"` (`TCronMethodTask`); the Data API has no push channel.
 - Modules configured in the application initialize before `onInitComplete`; a lazily loaded module initializes later, when `TApplication::hasStateFlag(TApplication::STATE_INITIALIZED)` is already true. `init()` handles both.
 - Framework core updates 'framework/classes.php' with new classes; this does NOT apply to this extension (see the PSR-4 / class-map note below).
@@ -187,10 +189,11 @@ Docblocks inform and describe; it is not persuasive writing.
 │   ├── GAnalyticsMeasurementProtocol.php   # Server-side Measurement Protocol client
 │   ├── GAnalyticsApiClient.php             # Base of the JSON API clients (request, requestAll)
 │   ├── GAnalyticsDataApi.php               # Data API v1beta; GAnalyticsReport.php is its report model
-│   ├── GAnalyticsAdminApi.php              # Admin API v1beta
+│   ├── GAnalyticsAdminApi.php              # Admin API v1beta; submitUserDeletion() on v1alpha
 │   ├── GAnalyticsApiException.php          # A Google API refusal
 │   ├── IGAnalyticsCredentials.php          # Token seam; GAnalyticsServiceAccountCredentials.php, GAnalyticsAccessTokenCredentials.php
 │   ├── IGAnalyticsConsentProvider.php      # Consent seam; IGAnalyticsConsentStore.php, GAnalyticsCookieConsentProvider.php, GAnalyticsPrivacyConsentProvider.php (prado-privacy binding)
+│   ├── GAnalyticsPersonalDataProvider.php  # prado-privacy IPersonalDataProvider (user deletion) and IProcessingActivityProvider
 │   ├── GAnalyticsHttpTransportTrait.php    # The one HTTP transport seam
 │   └── GAnalyticsShellAction.php           # prado-cli ganalytics/*
 ├── tests/

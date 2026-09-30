@@ -36,6 +36,11 @@
 	},
 	"repositories": [
 		{
+			"name": "prado-privacy",
+			"type": "vcs",
+			"url": "https://github.com/belisoful/prado-privacy"
+		},
+		{
 			"type": "composer",
 			"url": "https://asset-packagist.org"
 		}
@@ -49,12 +54,13 @@
 		"ext-openssl": "Signing the service account JWT for the Data API and Admin API (GAnalyticsServiceAccountCredentials).",
 		"belisoful/prado-webhooks": "Pushing realtime figures from pollRealtime() to other systems; the Data API itself is pull-only.",
 		"belisoful/prado-websocket": "Pushing realtime figures from pollRealtime() to browsers.",
-		"belisoful/prado-privacy": "Consent management (banner, preferences, consent log, regions, Global Privacy Control) driving Consent Mode through GAnalyticsPrivacyConsentProvider."
+		"belisoful/prado-privacy": "Consent management driving Consent Mode (GAnalyticsPrivacyConsentProvider), and erasure requests and records of processing for Google Analytics (GAnalyticsPersonalDataProvider)."
 	},
 	"require-dev": {
 		"phpunit/phpunit": "^10",
 		"friendsofphp/php-cs-fixer": "^3.95",
-		"phpstan/phpstan": "^2.1"
+		"phpstan/phpstan": "^2.1",
+		"belisoful/prado-privacy": "dev-main"
 	},
 	"config": {
 		"platform": {

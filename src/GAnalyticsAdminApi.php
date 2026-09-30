@@ -10,13 +10,15 @@
 
 namespace belisoful\GAnalytics;
 
+use Prado\Exceptions\TInvalidDataValueException;
+
 /**
  * GAnalyticsAdminApi class.
  *
  * The Google Analytics Admin API v1beta: the accounts, properties and data streams the
  * credentials can see, and the Measurement Protocol secrets of a stream. The helpers cover the
  * lookups an application needs to configure itself (which property, which Measurement ID, which
- * API secret); every other method of the API is reachable through {@see request()} and
+ * API secret), and {@see submitUserDeletion()} erases a user's data; every other method of the API is reachable through {@see request()} and
  * {@see requestAll()}. Writes need {@see GAnalyticsServiceAccountCredentials::SCOPE_EDIT}.
  *
  * ```php
@@ -36,6 +38,9 @@ class GAnalyticsAdminApi extends GAnalyticsApiClient
 {
 	/** The Admin API v1beta base URL. */
 	public const DEFAULT_BASE_URL = 'https://analyticsadmin.googleapis.com/v1beta';
+
+	/** The identifier kinds {@see submitUserDeletion()} accepts. */
+	public const USER_DELETION_KINDS = ['userId', 'clientId', 'appInstanceId', 'userProvidedData'];
 
 	/**
 	 * @return string {@see DEFAULT_BASE_URL}.
@@ -120,6 +125,71 @@ class GAnalyticsAdminApi extends GAnalyticsApiClient
 	public function createMeasurementProtocolSecret(string $stream, string $displayName): array
 	{
 		return $this->request('POST', $stream . '/measurementProtocolSecrets', ['displayName' => $displayName]);
+	}
+
+	/**
+	 * Asks Google to delete a user's data from a property (Admin API v1alpha `submitUserDeletion`,
+	 * needs {@see GAnalyticsServiceAccountCredentials::SCOPE_EDIT}). Google deletes the events
+	 * collected before the request time; the deletion completes asynchronously.
+	 *
+	 * | Kind | Identifier |
+	 * |---|---|
+	 * | `userId` | the GA4 `user_id` |
+	 * | `clientId` | the GA4 client id (`_ga` cookie) |
+	 * | `appInstanceId` | a Firebase app instance id |
+	 * | `userProvidedData` | one email address or phone number, normalized by {@see normalizeUserProvidedData()} |
+	 * @param string $property The property resource name, `properties/{id}`, or the id.
+	 * @param string $kind The identifier kind, one of {@see USER_DELETION_KINDS}.
+	 * @param string $id The identifier.
+	 * @throws TInvalidDataValueException When the kind is unknown or the identifier is empty.
+	 * @throws GAnalyticsApiException When the API refuses the request.
+	 * @return string The `deletionRequestTime`: Google deletes the data collected before it.
+	 */
+	public function submitUserDeletion(string $property, string $kind, string $id): string
+	{
+		if (!\in_array($kind, self::USER_DELETION_KINDS, true)) {
+			throw new TInvalidDataValueException('ganalytics_user_deletion_kind_invalid', $kind, \implode(', ', self::USER_DELETION_KINDS));
+		}
+		$id = $kind === 'userProvidedData' ? static::normalizeUserProvidedData($id) : \trim($id);
+		if ($id === '') {
+			throw new TInvalidDataValueException('ganalytics_user_deletion_id_empty', $kind);
+		}
+		$url = $this->getAlphaBaseUrl() . '/' . static::resourceName('properties', $property) . ':submitUserDeletion';
+		$response = $this->requestUrl('POST', $url, [$kind => $id]);
+		return (string) ($response['deletionRequestTime'] ?? '');
+	}
+
+	/**
+	 * Returns the base URL of the Admin API v1alpha, where `submitUserDeletion` lives: the
+	 * {@see getBaseUrl() BaseUrl} with a trailing `/v1beta` replaced by `/v1alpha`. A proxy or mock
+	 * base URL without that suffix is used as is.
+	 * @return string The v1alpha base URL, without a trailing slash.
+	 */
+	public function getAlphaBaseUrl(): string
+	{
+		$base = $this->getBaseUrl();
+		return \str_ends_with($base, '/v1beta') ? \substr($base, 0, -7) . '/v1alpha' : $base;
+	}
+
+	/**
+	 * Normalizes an email address or phone number the way Google matches user-provided data:
+	 * an email is trimmed and lowercased, with the periods before the `@` removed for `gmail.com`
+	 * and `googlemail.com`; a phone number keeps its digits after a `+`.
+	 * @param string $value The email address or phone number.
+	 * @return string The normalized value; empty when nothing remains.
+	 */
+	public static function normalizeUserProvidedData(string $value): string
+	{
+		$value = \strtolower(\trim($value));
+		if (\str_contains($value, '@')) {
+			[$local, $domain] = \explode('@', $value, 2);
+			if ($domain === 'gmail.com' || $domain === 'googlemail.com') {
+				$local = \str_replace('.', '', $local);
+			}
+			return $local . '@' . $domain;
+		}
+		$digits = \preg_replace('/\D+/', '', $value);
+		return $digits === '' ? '' : '+' . $digits;
 	}
 
 	/**

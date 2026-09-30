@@ -30,10 +30,13 @@ use Prado\TPropertyValue;
  * | `ganalytics/report <metrics> [dimensions] [start] [end]` | Runs a Data API report and prints the rows |
  * | `ganalytics/realtime [metrics] [dimensions]` | Runs a realtime report and prints the rows |
  * | `ganalytics/properties` | Lists the accounts and properties the credentials can see, with each web stream's Measurement ID |
+ * | `ganalytics/delete-user <id>` | Asks Google to delete a user's data from the property |
  *
  * Metrics and dimensions are comma-separated names. `--clientid=` and `--userid=` set the client
  * and user ids of `send` and `validate`; `--limit=` the row limit of `report` and `realtime`;
- * `--property=` the property of `report`, `realtime` and `properties` for the run.
+ * `--property=` the property of `report`, `realtime`, `properties` and `delete-user` for the run;
+ * `--kind=` the identifier kind of `delete-user`: `userId` (the default), `clientId`,
+ * `appInstanceId` or `userProvidedData`.
  *
  * ```sh
  * php prado-cli.php ganalytics/send purchase '{"value": 9.99, "currency": "USD"}' --clientid=123.456
@@ -45,9 +48,9 @@ use Prado\TPropertyValue;
 class GAnalyticsShellAction extends TShellAction
 {
 	protected $action = 'ganalytics';
-	protected $methods = ['status', 'send', 'validate', 'report', 'realtime', 'properties'];
-	protected $parameters = [null, 'event', 'event', 'metrics', null, null];
-	protected $optional = [null, 'params-json', 'params-json', 'dimensions start end', 'metrics dimensions', null];
+	protected $methods = ['status', 'send', 'validate', 'report', 'realtime', 'properties', 'delete-user'];
+	protected $parameters = [null, 'event', 'event', 'metrics', null, null, 'id'];
+	protected $optional = [null, 'params-json', 'params-json', 'dimensions start end', 'metrics dimensions', null, null];
 	protected $description = [
 		'Google Analytics 4: inspect the tag, send events, and read reports.',
 		'Prints the effective configuration and the tag script.',
@@ -56,6 +59,7 @@ class GAnalyticsShellAction extends TShellAction
 		'Runs a Data API report over a date range and prints the rows.',
 		'Runs a realtime report and prints the rows.',
 		'Lists the accounts, properties and web streams the credentials can see.',
+		'Asks Google to delete a user\'s data from the property.',
 	];
 
 	/** @var null|false|GAnalyticsModule The module: false until resolved, then the module or null when none is configured. */
@@ -70,8 +74,11 @@ class GAnalyticsShellAction extends TShellAction
 	/** @var ?int The row limit of report and realtime. */
 	private ?int $_limit = null;
 
-	/** @var ?string The property override of report, realtime and properties. */
+	/** @var ?string The property override of report, realtime, properties and delete-user. */
 	private ?string $_property = null;
+
+	/** @var string The identifier kind of delete-user. */
+	private string $_kind = 'userId';
 
 	/**
 	 * @param string $methodID The command.
@@ -83,6 +90,7 @@ class GAnalyticsShellAction extends TShellAction
 			'send', 'validate' => ['clientid', 'userid'],
 			'report', 'realtime' => ['limit', 'property'],
 			'properties' => ['property'],
+			'delete-user' => ['property', 'kind'],
 			default => [],
 		};
 	}
@@ -92,7 +100,7 @@ class GAnalyticsShellAction extends TShellAction
 	 */
 	public function optionAliases(): array
 	{
-		return ['c' => 'clientid', 'u' => 'userid', 'l' => 'limit', 'p' => 'property'];
+		return ['c' => 'clientid', 'u' => 'userid', 'l' => 'limit', 'p' => 'property', 'k' => 'kind'];
 	}
 
 	/**
@@ -338,6 +346,39 @@ class GAnalyticsShellAction extends TShellAction
 	}
 
 	/**
+	 * Asks Google to delete a user's data from the property: `ganalytics/delete-user <id>`.
+	 * @param array $args The command line arguments.
+	 * @return bool Whether the command ran.
+	 */
+	public function actionDeleteUser($args)
+	{
+		if (($module = $this->getModule()) === null) {
+			return true;
+		}
+		$writer = $this->getWriter();
+		$id = (string) ($args[1] ?? '');
+		$property = $this->_property ?? $module->getPropertyId();
+		if ($property === null) {
+			$writer->writeError('The property is unset: configure the module\'s PropertyId or pass --property.');
+			return true;
+		}
+		$property = GAnalyticsAdminApi::resourceName('properties', $property);
+		try {
+			$time = $module->getAdminApi()->submitUserDeletion($property, $this->_kind, $id);
+		} catch (TException $e) {
+			$writer->writeError($e->getMessage());
+			return true;
+		}
+		$writer->writeLine();
+		$writer->write('Deletion of ' . $this->_kind . ' ');
+		$writer->write($id, [TShellWriter::BOLD]);
+		$writer->writeLine(' submitted to ' . $property . '.', [TShellWriter::GREEN]);
+		$writer->writeLine('  Google deletes the data collected before ' . ($time !== '' ? $time : 'the request') . '.');
+		$writer->writeLine();
+		return true;
+	}
+
+	/**
 	 * Returns the module's Data API, on the `--property` override when given.
 	 * @param GAnalyticsModule $module The module.
 	 * @return GAnalyticsDataApi The client.
@@ -511,5 +552,22 @@ class GAnalyticsShellAction extends TShellAction
 	{
 		$value = TPropertyValue::ensureNullIf($value, TPropertyValue::FILTER_TRIM_VALUE | TPropertyValue::FILTER_EMPTY);
 		$this->_property = ($value === null) ? null : \trim((string) TPropertyValue::ensureString($value));
+	}
+
+	/**
+	 * @return string The identifier kind of delete-user. Defaults to `userId`.
+	 */
+	public function getKind(): string
+	{
+		return $this->_kind;
+	}
+
+	/**
+	 * @param mixed $value The identifier kind of delete-user; empty restores `userId`.
+	 */
+	public function setKind($value): void
+	{
+		$value = \trim(TPropertyValue::ensureString($value));
+		$this->_kind = $value === '' ? 'userId' : $value;
 	}
 }

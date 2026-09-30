@@ -1,6 +1,6 @@
 # PRADO Google Analytics Extension
 
-Google Analytics 4 for the [PRADO PHP Framework](https://github.com/pradosoft/prado) (version 4.4+), implemented as a PRADO 4 extension. One module, `GAnalyticsModule`, does the whole job: it puts the Google tag on every page (gtag.js, a Tag Manager container, or both), sends events from PHP for pages, ActiveControl callbacks and code without a browser, hooks PRADO's own events (errors, logins, validation), keeps a Content Security Policy working, reads reports back through the Data API, and adds `prado-cli ganalytics/*` commands.
+Google Analytics 4 for the [PRADO PHP Framework](https://github.com/pradosoft/prado) (version 4.4+), implemented as a PRADO 4 extension. One module, `GAnalyticsModule`, does the whole job: it puts the Google tag on every page (gtag.js, a Tag Manager container, or both), sends events from PHP for pages, ActiveControl callbacks and code without a browser, hooks PRADO's own events (errors, logins, validation), keeps a Content Security Policy working, reads reports back through the Data API, erases a user's data on request, and adds `prado-cli ganalytics/*` commands.
 
 | Class | Role |
 |---|---|
@@ -8,10 +8,11 @@ Google Analytics 4 for the [PRADO PHP Framework](https://github.com/pradosoft/pr
 | `GAnalyticsPageBehavior` | A class behavior on `TPage`: `trackEvent()`, `updateConsent()`, `setUserProperties()`, `gtag()` and `getGAnalytics()` on every page |
 | `GAnalyticsMeasurementProtocol` | Server-side events: up to 25 per request for one client id, timestamped from PRADO's clock |
 | `GAnalyticsDataApi`, `GAnalyticsReport` | The Data API (reports, realtime, pivots, metadata, compatibility); a report is rows that bind to a data control |
-| `GAnalyticsAdminApi` | The Admin API: accounts, properties, data streams, Measurement Protocol secrets |
+| `GAnalyticsAdminApi` | The Admin API: accounts, properties, data streams, Measurement Protocol secrets, user deletion |
 | `IGAnalyticsCredentials`, `GAnalyticsServiceAccountCredentials`, `GAnalyticsAccessTokenCredentials` | The token seam for the APIs: a service account JWT flow, or a token from elsewhere |
 | `IGAnalyticsConsentProvider`, `IGAnalyticsConsentStore`, `GAnalyticsCookieConsentProvider` | The consent seam and a cookie-backed store |
 | `GAnalyticsPrivacyConsentProvider` | The binding to a consent management module (`belisoful/prado-privacy`) |
+| `GAnalyticsPersonalDataProvider` | Erasure and export of a user's Google Analytics data, and the Google Analytics entry in the records of processing (`belisoful/prado-privacy`) |
 | `GAnalyticsShellAction` | `prado-cli ganalytics/status`, `send`, `validate`, `report`, `realtime`, `properties` |
 | `GAnalyticsApiException` | A Google API refusal, with the status and Google's message |
 
@@ -293,7 +294,8 @@ $this->Grid->dataBind();
 
 $live = $module->runRealtimeReport(['activeUsers'], ['country']);
 $api = $module->getDataApi();                     // runReport(), runRealtimeReport(), batchRunReports(), runPivotReport(), getMetadata(), checkCompatibility(), call()
-$admin = $module->getAdminApi();                  // listAccountSummaries(), listProperties(), listDataStreams(), listMeasurementProtocolSecrets(), createMeasurementProtocolSecret(), request()
+$admin = $module->getAdminApi();                  // listAccountSummaries(), listProperties(), listDataStreams(), listMeasurementProtocolSecrets(), createMeasurementProtocolSecret(), submitUserDeletion(), request()
+$module->deleteUserData($userId);                 // or ($clientId, 'clientId'): Google deletes the data collected before the returned time
 ```
 
 `GAnalyticsReport` is countable and iterable; its rows are associative arrays keyed by dimension and metric name with metric values cast to `int` or `float` by their type, and `getTotals()`, `getRowCount()`, `getMetadata()` and `getResponse()` expose the rest. `GAnalyticsDataApi::reportRequest()` and `realtimeRequest()` build the API's request bodies from names; any other request shape is passed as an array. A refused request throws `GAnalyticsApiException` with the status and Google's message.
@@ -316,6 +318,32 @@ With `AmendCsp` (the default) the module adds the hosts the tag needs to every `
 
 Two framework notes for a CSP setup: the response module must name the headers manager (`<module id="response" class="THttpResponse" HeadersManager="headers" />`), and the security manager should carry a configured `ValidationKey`, because `THttpHeaderCsp` reads the security manager for its nonce while the modules initialize, before the application state that holds a generated key is loaded; a generated key then differs per request and postbacks fail with "Page state is corrupted".
 
+## Data subject rights and records of processing
+
+`deleteUserData($id, $kind)` asks Google to delete one user's data from the property through the Admin API's `submitUserDeletion` (v1alpha; the Universal Analytics User Deletion API is retired). The kind is `userId` (the default), `clientId`, `appInstanceId` or `userProvidedData` (an email address or phone number, normalized as Google matches it). Google deletes the events collected before the returned `deletionRequestTime`; the deletion completes asynchronously. The credentials need the `analytics.edit` scope and the Editor role on the property.
+
+With [belisoful/prado-privacy](https://github.com/belisoful/prado-privacy), `GAnalyticsPersonalDataProvider` does this for every erasure request. `TPrivacyModule` and `TProcessingRegistry` discover it as a loaded module:
+
+```xml
+<module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" PropertyId="123456789" UserIdFromUser="true">
+    <credentials class="belisoful\GAnalytics\GAnalyticsServiceAccountCredentials" KeyFile="ga4-service-account.json"
+        Scopes="https://www.googleapis.com/auth/analytics.readonly https://www.googleapis.com/auth/analytics.edit" />
+</module>
+<module id="privacy-google" class="belisoful\GAnalytics\GAnalyticsPersonalDataProvider" />
+```
+
+| Right | Effect |
+|---|---|
+| Erasure | One deletion request per identifier of the subject; each accepted request counts as one erased item. A refused request is an error in the result, with its status and without the identifier; when every request is refused, the refusal is thrown and the privacy request is recorded as failed |
+| Export | The property and the identifiers Google Analytics holds the subject's events under. GA4 has no per-user export API; the property's User Explorer report shows the events |
+| Rectification | None: Google Analytics data is deleted, never corrected |
+
+The subject's identifiers come from the user name (the derived `user_id`, when the analytics module's `UserIdFromUser` is on), from `TDataSubject` identifiers of the kinds `ga_user_id`, `ga_client_id` and `ga_app_instance_id` (each a comma- or space-separated list, for ids the application recorded), from the request's `_ga` cookie when the subject is the logged-in requester, and, with `EraseUserProvidedData="true"`, from the subject's email. Store a user's client ids at login if their data from other devices must be found later.
+
+`getProcessingActivities()` adds Google Analytics to the records of processing: the purpose, consent as the legal basis, the data and subject categories (registered users and the pseudonymous id when `UserIdFromUser` is on), Google as the recipient, the transfer to the United States, and the property's data retention setting as the retention period. `Activity` (an array, or a JSON object in XML) overrides any field, such as `{"LegalBasis": "LegitimateInterests", "RetentionPolicy": "ga4"}`. The defaults describe a typical GA4 setup; review them against the property's settings and the contracts with Google.
+
+`AnalyticsModule` names the analytics module when there are several; `PersonalDataName` renames the provider's key in an export (`google-analytics`). The class implements `belisoful/prado-privacy` interfaces, so it loads only where that package is installed; nothing else in this extension requires it.
+
 ## Command line
 
 In a `TShellApplication` the module registers `ganalytics/*`:
@@ -327,6 +355,7 @@ php prado-cli.php ganalytics/validate purchase '{"value": 9.99}'             # t
 php prado-cli.php ganalytics/report activeUsers,screenPageViews pagePath 7daysAgo today --limit=20
 php prado-cli.php ganalytics/realtime activeUsers country
 php prado-cli.php ganalytics/properties                                      # accounts, properties, web streams and their Measurement IDs
+php prado-cli.php ganalytics/delete-user 1234567890.1700000000 --kind=clientId  # Admin API user deletion (--property= for another property)
 ```
 
 ## Development

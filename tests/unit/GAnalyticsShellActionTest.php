@@ -62,6 +62,8 @@ class GAnalyticsShellActionTest extends TestCase
 		self::assertSame('report', $action->isValidAction(['ganalytics/report', 'activeUsers']));
 		self::assertSame('realtime', $action->isValidAction(['ganalytics/realtime']));
 		self::assertSame('properties', $action->isValidAction(['ganalytics/properties']));
+		self::assertSame('delete-user', $action->isValidAction(['ganalytics/delete-user', 'u-1']));
+		self::assertNull($action->isValidAction(['ganalytics/delete-user']), 'delete-user needs an id.');
 		self::assertNull($action->isValidAction(['ganalytics/nope']));
 		self::assertNull($action->isValidAction(['other']));
 		self::assertSame(['clientid', 'userid'], $action->options('send'));
@@ -69,8 +71,9 @@ class GAnalyticsShellActionTest extends TestCase
 		self::assertSame(['limit', 'property'], $action->options('report'));
 		self::assertSame(['limit', 'property'], $action->options('realtime'));
 		self::assertSame(['property'], $action->options('properties'));
+		self::assertSame(['property', 'kind'], $action->options('delete-user'));
 		self::assertSame([], $action->options('status'));
-		self::assertSame(['c' => 'clientid', 'u' => 'userid', 'l' => 'limit', 'p' => 'property'], $action->optionAliases());
+		self::assertSame(['c' => 'clientid', 'u' => 'userid', 'l' => 'limit', 'p' => 'property', 'k' => 'kind'], $action->optionAliases());
 	}
 
 	public function testOptionsCoerce()
@@ -94,6 +97,11 @@ class GAnalyticsShellActionTest extends TestCase
 		self::assertNull($action->getProperty());
 		$action->setLimit(-3);
 		self::assertSame(1, $action->getLimit());
+		self::assertSame('userId', $action->getKind());
+		$action->setKind(' clientId ');
+		self::assertSame('clientId', $action->getKind());
+		$action->setKind('');
+		self::assertSame('userId', $action->getKind());
 	}
 
 	public function testStatusPrintsTheConfiguration()
@@ -216,6 +224,7 @@ class GAnalyticsShellActionTest extends TestCase
 		self::assertTrue($action->actionReport(['ganalytics/report', 'activeUsers']));
 		self::assertTrue($action->actionRealtime(['ganalytics/realtime']));
 		self::assertTrue($action->actionProperties(['ganalytics/properties']));
+		self::assertTrue($action->actionDeleteUser(['ganalytics/delete-user', 'u-1']));
 		self::assertStringContainsString('is not configured', $this->printed());
 	}
 
@@ -370,5 +379,50 @@ class GAnalyticsShellActionTest extends TestCase
 		$action = $this->action($module);
 		$action->actionProperties(['ganalytics/properties']);
 		self::assertStringContainsString('nope', $this->printed());
+	}
+
+	public function testDeleteUserSubmitsTheDeletion()
+	{
+		$module = $this->module();
+		$module->adminApi->answer(['deletionRequestTime' => '2026-09-29T12:00:00Z']);
+		$action = $this->action($module);
+		self::assertTrue($action->actionDeleteUser(['ganalytics/delete-user', 'u-1']));
+		$out = $this->printed();
+		self::assertStringContainsString('Deletion of userId u-1 submitted to properties/123.', $out);
+		self::assertStringContainsString('before 2026-09-29T12:00:00Z', $out);
+		self::assertStringEndsWith('/v1alpha/properties/123:submitUserDeletion', $module->adminApi->requests[0]['url']);
+		self::assertSame(['userId' => 'u-1'], $module->adminApi->lastBody());
+
+		$module->adminApi->answer([]);
+		$action = $this->action($module);
+		$action->setProperty('9');
+		$action->setKind('clientId');
+		$action->actionDeleteUser(['ganalytics/delete-user', '1.2']);
+		$out = $this->printed();
+		self::assertStringContainsString('Deletion of clientId 1.2 submitted to properties/9.', $out);
+		self::assertStringContainsString('before the request', $out);
+		self::assertSame(['clientId' => '1.2'], $module->adminApi->lastBody());
+		self::assertSame('123', $module->getPropertyId(), 'the override leaves the module alone');
+	}
+
+	public function testDeleteUserReportsErrors()
+	{
+		$module = $this->module();
+		$module->setPropertyId('');
+		$action = $this->action($module);
+		$action->actionDeleteUser(['ganalytics/delete-user', 'u-1']);
+		self::assertStringContainsString('The property is unset', $this->printed());
+
+		$module->setPropertyId('123');
+		$action = $this->action($module);
+		$action->setKind('email');
+		$action->actionDeleteUser(['ganalytics/delete-user', 'u-1']);
+		self::assertStringContainsString("kind 'email' is not valid", $this->printed());
+
+		$module->adminApi->answer(['error' => ['message' => 'denied']], 403);
+		$action = $this->action($module);
+		$action->actionDeleteUser(['ganalytics/delete-user', 'u-1']);
+		self::assertStringContainsString('denied', $this->printed());
+		self::assertCount(1, $module->adminApi->requests);
 	}
 }

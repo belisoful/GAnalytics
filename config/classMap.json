@@ -13,5 +13,6 @@
 	"IGAnalyticsConsentProvider": "belisoful\\GAnalytics\\IGAnalyticsConsentProvider",
 	"IGAnalyticsConsentStore": "belisoful\\GAnalytics\\IGAnalyticsConsentStore",
 	"GAnalyticsCookieConsentProvider": "belisoful\\GAnalytics\\GAnalyticsCookieConsentProvider",
-	"GAnalyticsPrivacyConsentProvider": "belisoful\\GAnalytics\\GAnalyticsPrivacyConsentProvider"
+	"GAnalyticsPrivacyConsentProvider": "belisoful\\GAnalytics\\GAnalyticsPrivacyConsentProvider",
+	"GAnalyticsPersonalDataProvider": "belisoful\\GAnalytics\\GAnalyticsPersonalDataProvider"
 }

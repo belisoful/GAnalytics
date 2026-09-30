@@ -5,6 +5,7 @@ namespace belisoful\GAnalytics\Test\Unit;
 use belisoful\GAnalytics\GAnalyticsAccessTokenCredentials;
 use belisoful\GAnalytics\GAnalyticsAdminApi;
 use PHPUnit\Framework\TestCase;
+use Prado\Exceptions\TInvalidDataValueException;
 
 class GAnalyticsAdminApiTest extends TestCase
 {
@@ -62,5 +63,67 @@ class GAnalyticsAdminApiTest extends TestCase
 		self::assertSame('new', $api->createMeasurementProtocolSecret('properties/5/dataStreams/7', 'cron')['secretValue']);
 		self::assertSame('POST', $api->requests[7]['method']);
 		self::assertSame(['displayName' => 'cron'], $api->lastBody());
+	}
+
+	public function testSubmitUserDeletionPostsToV1alpha()
+	{
+		$api = $this->api();
+		$api->answer(['deletionRequestTime' => '2026-09-29T12:00:00Z']);
+		self::assertSame('2026-09-29T12:00:00Z', $api->submitUserDeletion('123', 'userId', ' abc '));
+		self::assertSame('POST', $api->requests[0]['method']);
+		self::assertSame('https://analyticsadmin.googleapis.com/v1alpha/properties/123:submitUserDeletion', $api->requests[0]['url']);
+		self::assertSame(['userId' => 'abc'], $api->lastBody());
+		self::assertContains('Authorization: Bearer tok-2', $api->requests[0]['headers']);
+
+		$api->answer([]);
+		self::assertSame('', $api->submitUserDeletion('properties/123', 'userProvidedData', ' First.Last@GMail.com '), 'no time in the answer');
+		self::assertSame(['userProvidedData' => 'firstlast@gmail.com'], $api->lastBody());
+
+		$api->submitUserDeletion('123', 'clientId', '1.2');
+		self::assertSame(['clientId' => '1.2'], $api->lastBody());
+		$api->submitUserDeletion('123', 'appInstanceId', 'app-9');
+		self::assertSame(['appInstanceId' => 'app-9'], $api->lastBody());
+	}
+
+	public function testSubmitUserDeletionRefusesBadInput()
+	{
+		$api = $this->api();
+		try {
+			$api->submitUserDeletion('123', 'email', 'a@b.c');
+			self::fail('unknown kind');
+		} catch (TInvalidDataValueException $e) {
+			self::assertSame('ganalytics_user_deletion_kind_invalid', $e->getErrorCode());
+		}
+		try {
+			$api->submitUserDeletion('123', 'userId', '  ');
+			self::fail('empty id');
+		} catch (TInvalidDataValueException $e) {
+			self::assertSame('ganalytics_user_deletion_id_empty', $e->getErrorCode());
+		}
+		try {
+			$api->submitUserDeletion('123', 'userProvidedData', '()-');
+			self::fail('nothing left after normalizing');
+		} catch (TInvalidDataValueException $e) {
+			self::assertSame('ganalytics_user_deletion_id_empty', $e->getErrorCode());
+		}
+		self::assertSame([], $api->requests, 'nothing was sent');
+	}
+
+	public function testAlphaBaseUrl()
+	{
+		$api = $this->api();
+		self::assertSame('https://analyticsadmin.googleapis.com/v1alpha', $api->getAlphaBaseUrl());
+		$api->setBaseUrl('http://127.0.0.1:9999/mock');
+		self::assertSame('http://127.0.0.1:9999/mock', $api->getAlphaBaseUrl(), 'a proxy or mock is used as is');
+		$api->submitUserDeletion('5', 'userId', 'u');
+		self::assertSame('http://127.0.0.1:9999/mock/properties/5:submitUserDeletion', $api->requests[0]['url']);
+	}
+
+	public function testNormalizeUserProvidedData()
+	{
+		self::assertSame('first.last@example.com', GAnalyticsAdminApi::normalizeUserProvidedData(' First.Last@Example.com '));
+		self::assertSame('firstlast@googlemail.com', GAnalyticsAdminApi::normalizeUserProvidedData('first.last@googlemail.com'));
+		self::assertSame('+15551234567', GAnalyticsAdminApi::normalizeUserProvidedData('+1 (555) 123-4567'));
+		self::assertSame('', GAnalyticsAdminApi::normalizeUserProvidedData(' - '));
 	}
 }

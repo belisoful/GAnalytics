@@ -15,7 +15,7 @@ ganalytics_api_error						= Google Analytics API request failed with status {0}:
 ganalytics_credentials_unconfigured			= {0} has no credentials configured.
 ganalytics_credentials_keyfile_unreadable	= Google service account key file '{0}' cannot be read.
 ganalytics_credentials_key_invalid			= Google service account key '{0}' is not valid; expected a JSON key with client_email and an RSA private_key.
-ganalytics_property_unconfigured			= The Data API needs a PropertyId.
+ganalytics_property_unconfigured			= The Data API and user deletion need a PropertyId.
 ganalytics_property_invalid					= Google Analytics property id '{0}' is not valid; expected the numeric id or 'properties/<id>'.
 ganalytics_module_invalid					= Module '{0}' is not a {1}.
 ganalytics_class_invalid					= Class '{0}' is not a {1}.
@@ -24,3 +24,5 @@ ganalytics_cookiename_invalid				= Cookie name '{0}' is not valid.
 ganalytics_expires_invalid					= Cookie life '{0}' is not valid; expected at least 1 day.
 ganalytics_category_map_invalid				= Category map '{0}' is not valid; expected a JSON object of category => Google consent type or types.
 ganalytics_consent_mode_invalid				= Consent mode '{0}' is not valid; expected 'advanced' or 'basic'.
+ganalytics_user_deletion_kind_invalid		= User deletion identifier kind '{0}' is not valid; expected one of {1}.
+ganalytics_user_deletion_id_empty			= User deletion needs a non-empty {0}.

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The minimal application the unit tests construct; the module under test is attached to it in code. -->
+<application id="ganalytics-tests" mode="Debug">
+</application>

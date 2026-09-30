@@ -1,0 +1,16 @@
+{
+	"GAnalyticsModule": "belisoful\\GAnalytics\\GAnalyticsModule",
+	"GAnalyticsPageBehavior": "belisoful\\GAnalytics\\GAnalyticsPageBehavior",
+	"GAnalyticsMeasurementProtocol": "belisoful\\GAnalytics\\GAnalyticsMeasurementProtocol",
+	"GAnalyticsShellAction": "belisoful\\GAnalytics\\GAnalyticsShellAction",
+	"GAnalyticsDataApi": "belisoful\\GAnalytics\\GAnalyticsDataApi",
+	"GAnalyticsAdminApi": "belisoful\\GAnalytics\\GAnalyticsAdminApi",
+	"GAnalyticsReport": "belisoful\\GAnalytics\\GAnalyticsReport",
+	"GAnalyticsApiException": "belisoful\\GAnalytics\\GAnalyticsApiException",
+	"IGAnalyticsCredentials": "belisoful\\GAnalytics\\IGAnalyticsCredentials",
+	"GAnalyticsAccessTokenCredentials": "belisoful\\GAnalytics\\GAnalyticsAccessTokenCredentials",
+	"GAnalyticsServiceAccountCredentials": "belisoful\\GAnalytics\\GAnalyticsServiceAccountCredentials",
+	"IGAnalyticsConsentProvider": "belisoful\\GAnalytics\\IGAnalyticsConsentProvider",
+	"IGAnalyticsConsentStore": "belisoful\\GAnalytics\\IGAnalyticsConsentStore",
+	"GAnalyticsCookieConsentProvider": "belisoful\\GAnalytics\\GAnalyticsCookieConsentProvider"
+}

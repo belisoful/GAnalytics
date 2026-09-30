@@ -1,0 +1,225 @@
+name: PRADO Google Analytics Extension
+on: [push, pull_request]
+env:
+  # The PHP version used for the browser (Playwright), live and coverage jobs
+  PHP_VERSION: '8.4'
+jobs:
+  composerext:
+    name: GAnalytics (PHP ${{ matrix.php-versions }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        php-versions: ['8.1', '8.2', '8.3', '8.4', '8.5']
+
+    defaults:
+      run:
+        working-directory: ganalytics
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v5
+        with:
+          path: ganalytics
+
+      - name: Checkout PRADO framework (4.4 dev)
+        uses: actions/checkout@v5
+        with:
+          repository: pradosoft/prado
+          ref: master
+          path: prado
+
+      - name: Setup PHP, with composer and extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php-versions }}
+          extensions: ctype, dom, intl, json, mbstring, openssl, pcre, spl
+          tools: php-cs-fixer, phpstan, cs2pr
+
+      - name: Validate composer.json and composer.lock
+        run: composer validate --strict
+
+      - name: Validate code syntax using php-cs-fixer (src)
+        run: php-cs-fixer check src -vvv --using-cache=no --format=checkstyle | cs2pr
+
+      - name: Validate code syntax using php-cs-fixer (tests)
+        run: php-cs-fixer check tests -vvv --using-cache=no --format=checkstyle | cs2pr
+
+      - name: Get composer cache directory
+        id: composer-cache
+        run: echo "dir=$(composer config cache-files-dir)" >> $GITHUB_OUTPUT
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.composer-cache.outputs.dir }}
+          key: ${{ runner.os }}-php${{ matrix.php-versions }}-composer-${{ hashFiles('**/composer.json') }}
+          restore-keys: ${{ runner.os }}-php${{ matrix.php-versions }}-composer-
+
+      - name: Register the sibling PRADO 4.4 checkout as a Composer path repository
+        run: composer config repositories.prado '{"type":"path","url":"../prado","options":{"symlink":true,"versions":{"pradosoft/prado":"4.4.0"}}}'
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Validate code using phpstan
+        run: phpstan analyse --error-format=checkstyle | cs2pr
+
+      - name: Run Unit Tests
+        run: composer unittest
+
+  coverage:
+    name: GAnalytics Coverage
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ganalytics
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v5
+        with:
+          path: ganalytics
+
+      - name: Checkout PRADO framework (4.4 dev)
+        uses: actions/checkout@v5
+        with:
+          repository: pradosoft/prado
+          ref: master
+          path: prado
+
+      - name: Setup PHP with Xdebug
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: ctype, dom, intl, json, mbstring, openssl, pcre, spl
+          coverage: xdebug
+
+      - name: Register the sibling PRADO 4.4 checkout as a Composer path repository
+        run: composer config repositories.prado '{"type":"path","url":"../prado","options":{"symlink":true,"versions":{"pradosoft/prado":"4.4.0"}}}'
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Measure unit test coverage
+        run: XDEBUG_MODE=coverage vendor/bin/phpunit --testsuite unit --path-coverage --coverage-text --coverage-clover build/coverage/clover.xml --coverage-html build/coverage/html
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: ganalytics/build/coverage/
+          retention-days: 30
+
+  playwright:
+    name: GAnalytics Playwright (${{ matrix.browser_name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chromium
+            browser_name: Chromium
+          - browser: firefox
+            browser_name: Firefox
+          - browser: webkit
+            browser_name: WebKit
+
+    defaults:
+      run:
+        working-directory: ganalytics
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v5
+        with:
+          path: ganalytics
+
+      - name: Checkout PRADO framework (4.4 dev)
+        uses: actions/checkout@v5
+        with:
+          repository: pradosoft/prado
+          ref: master
+          path: prado
+
+      - name: Setup PHP, with composer and extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: ctype, dom, intl, json, mbstring, openssl, pcre, spl
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: ganalytics/.nvmrc
+
+      - name: Install npm dependencies
+        run: npm install
+
+      - name: Install Playwright browser (${{ matrix.browser_name }})
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Register the sibling PRADO 4.4 checkout as a Composer path repository
+        run: composer config repositories.prado '{"type":"path","url":"../prado","options":{"symlink":true,"versions":{"pradosoft/prado":"4.4.0"}}}'
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Run Playwright end-to-end tests (${{ matrix.browser_name }})
+        run: npx playwright test --project=${{ matrix.browser }}
+
+      - name: Upload Playwright report (${{ matrix.browser_name }})
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: ganalytics/build/playwright-report/
+          retention-days: 30
+
+  live:
+    # Talks to a real Google Analytics property with the repository secrets below. Every live
+    # test skips when a secret is absent, so a fork without secrets passes with skipped tests.
+    name: GAnalytics Live (Google)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
+    defaults:
+      run:
+        working-directory: ganalytics
+
+    env:
+      GA4_MEASUREMENT_ID: ${{ secrets.GA4_MEASUREMENT_ID }}
+      GA4_API_SECRET: ${{ secrets.GA4_API_SECRET }}
+      GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+      GA4_SERVICE_ACCOUNT_JSON: ${{ secrets.GA4_SERVICE_ACCOUNT_JSON }}
+
+    steps:
+      - name: Checkout extension
+        uses: actions/checkout@v5
+        with:
+          path: ganalytics
+
+      - name: Checkout PRADO framework (4.4 dev)
+        uses: actions/checkout@v5
+        with:
+          repository: pradosoft/prado
+          ref: master
+          path: prado
+
+      - name: Setup PHP, with composer and extensions
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          extensions: ctype, dom, intl, json, mbstring, openssl, pcre, spl
+
+      - name: Register the sibling PRADO 4.4 checkout as a Composer path repository
+        run: composer config repositories.prado '{"type":"path","url":"../prado","options":{"symlink":true,"versions":{"pradosoft/prado":"4.4.0"}}}'
+
+      - name: Install Composer dependencies
+        run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+      - name: Run live tests against Google Analytics
+        run: composer livetest

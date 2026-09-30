@@ -1,0 +1,9 @@
+<!DOCTYPE html>
+<html>
+<head><title>GAnalytics e2e: no THead</title></head>
+<body>
+<com:TForm>
+	<h1>No THead</h1>
+</com:TForm>
+</body>
+</html>

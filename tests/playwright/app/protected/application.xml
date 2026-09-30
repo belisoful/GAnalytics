@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<application id="ganalytics-e2e" Mode="Debug">
+	<modules>
+		<!-- A fixed key: THttpHeaderCsp reads the security manager for its nonce while the module
+		     configuration is applied, before the application state that holds a generated key is
+		     loaded, so a generated key would differ per request and every postback would fail. -->
+		<module id="security" class="TSecurityManager" ValidationKey="e2e-validation-key-not-a-secret" />
+		<module id="response" class="THttpResponse" HeadersManager="headers" />
+		<module id="headers" class="Prado\Web\HttpHeaders\THttpHeadersManager" ReportOnly="false">
+			<header class="Prado\Web\HttpHeaders\THttpHeaderCsp">
+				<policy Name="default-src">'self' NONCE</policy>
+				<policy Name="style-src">'self' 'unsafe-inline'</policy>
+			</header>
+		</module>
+		<module id="consent" class="belisoful\GAnalytics\GAnalyticsCookieConsentProvider" CookieName="e2e_consent" />
+		<module id="ganalytics" class="belisoful\GAnalytics\GAnalyticsModule" MeasurementId="G-E2ETEST123" ConsentProvider="consent"
+			ConsentDefaults='{"analytics_storage": "denied", "ad_storage": "denied"}'
+			PagePathAsContentGroup="true" TrackValidationErrors="true" />
+	</modules>
+	<services>
+		<service id="page" class="TPageService" DefaultPage="Home" />
+	</services>
+</application>

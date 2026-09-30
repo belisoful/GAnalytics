@@ -1,30 +1,101 @@
 {
 	"name": "belisoful/ganalytics",
-	"version": "v0.0.1",
-	"version_normalized": "0.0.1",
-	"description": "PRADO Plugin for Google Analytics",
-	"license": "BSD-3-Clause",
 	"type": "prado4-extension",
-	"keywords": [ "prado", "google", "analytics", "API", "metrics", "traffic", "extension"],
+	"description": "Google Analytics 4 (gtag.js) for the PRADO PHP framework: a module that injects the Google tag into every page.",
+	"keywords": [
+		"prado",
+		"google",
+		"analytics",
+		"ga4",
+		"gtag",
+		"measurement",
+		"metrics",
+		"traffic",
+		"extension"
+	],
 	"homepage": "https://github.com/belisoful/GAnalytics",
+	"license": "BSD-3-Clause",
 	"authors": [
 		{
 			"name": "Brad Anderson",
 			"email": "belisoful@icloud.com",
-			"role": "Software Architect",
+			"role": "Developer",
 			"homepage": "https://github.com/belisoful"
 		}
 	],
-	"notification-url": "https://packagist.org/downloads/",
 	"autoload": {
 		"psr-4": {
 			"belisoful\\GAnalytics\\": "src"
 		}
 	},
+	"autoload-dev": {
+		"psr-4": {
+			"belisoful\\GAnalytics\\Test\\Unit\\": "tests/unit/",
+			"belisoful\\GAnalytics\\Test\\Live\\": "tests/live/"
+		}
+	},
+	"repositories": [
+		{
+			"type": "composer",
+			"url": "https://asset-packagist.org"
+		}
+	],
+	"prefer-stable": true,
 	"require": {
-		"pradosoft/prado" : ">=4.2.0"
+		"php": ">=8.1.0",
+		"pradosoft/prado": "^4.4@dev"
+	},
+	"suggest": {
+		"ext-openssl": "Signing the service account JWT for the Data API and Admin API (GAnalyticsServiceAccountCredentials).",
+		"belisoful/prado-webhooks": "Pushing realtime figures from pollRealtime() to other systems; the Data API itself is pull-only.",
+		"belisoful/prado-websocket": "Pushing realtime figures from pollRealtime() to browsers."
+	},
+	"require-dev": {
+		"phpunit/phpunit": "^10",
+		"friendsofphp/php-cs-fixer": "^3.95",
+		"phpstan/phpstan": "^2.1"
+	},
+	"config": {
+		"platform": {
+			"php": "8.1"
+		}
+	},
+	"scripts": {
+		"fix": [
+			"vendor/bin/php-cs-fixer fix src",
+			"vendor/bin/php-cs-fixer fix tests"
+		],
+		"stan": "vendor/bin/phpstan analyse --memory-limit=1G",
+		"unittest": "vendor/bin/phpunit --testsuite unit",
+		"livetest": "vendor/bin/phpunit --testsuite live",
+		"coverage": [
+			"@putenv XDEBUG_MODE=coverage",
+			"vendor/bin/phpunit --testsuite unit --coverage-text"
+		],
+		"coverage-html": [
+			"@putenv XDEBUG_MODE=coverage",
+			"vendor/bin/phpunit --testsuite unit --coverage-html build/coverage"
+		],
+		"coverage-paths": [
+			"@putenv XDEBUG_MODE=coverage",
+			"vendor/bin/phpunit --testsuite unit --path-coverage --coverage-text"
+		],
+		"coverage-branches": [
+			"@putenv XDEBUG_MODE=coverage",
+			"vendor/bin/phpunit --testsuite unit --path-coverage --coverage-php build/coverage/paths.php",
+			"php tests/test_tools/coverage-branches.php"
+		],
+		"fulltest": [
+			"@fix",
+			"@stan",
+			"@unittest"
+		]
 	},
 	"extra": {
-		"bootstrap": "belisoful\\GAnalytics\\GAnalyticsModule"
+		"prado": {
+			"bootstrap": "belisoful\\GAnalytics\\GAnalyticsModule",
+			"error-messages": "config/errorMessages.txt",
+			"class-map": "config/classMap.json"
+		}
 	}
 }

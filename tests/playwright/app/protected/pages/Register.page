@@ -1,0 +1,12 @@
+<!DOCTYPE html>
+<html>
+<com:THead Title="GAnalytics e2e: Register" />
+<body>
+<com:TForm>
+	<h1>Register</h1>
+	<com:TTextBox ID="name" />
+	<com:TRequiredFieldValidator ID="nameRequired" ControlToValidate="name" ErrorMessage="Name is required" EnableClientScript="false" />
+	<com:TButton ID="submit" Text="Register" />
+</com:TForm>
+</body>
+</html>

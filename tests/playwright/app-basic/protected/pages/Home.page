@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<com:THead Title="GAnalytics e2e: basic consent mode" />
+<body>
+<com:TForm>
+	<h1>Basic consent mode</h1>
+	<com:TActiveButton ID="track" Text="Track" OnCallback="trackClick" />
+	<com:TActiveButton ID="grant" Text="Grant by callback" OnCallback="grantConsent" />
+	<com:TButton ID="grantPost" Text="Grant by postback" OnClick="grantConsent" />
+	<com:TActiveLabel ID="status" Text="idle" />
+</com:TForm>
+</body>
+</html>

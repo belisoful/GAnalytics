@@ -172,6 +172,17 @@ class GAnalyticsShellActionTest extends TestCase
 		self::assertStringContainsString("Tag script\ninvalid:", $out, 'The rest of the report still prints.');
 	}
 
+	public function testStatusShowsTheConsentMode()
+	{
+		$module = $this->module();
+		$action = $this->action($module);
+		$action->actionStatus([]);
+		self::assertMatchesRegularExpression('/Consent mode +advanced\n/', $this->printed());
+		$module->setConsentMode('basic');
+		$action->actionStatus([]);
+		self::assertMatchesRegularExpression('/Consent mode +basic \(tag after analytics_storage or ad_storage\)/', $this->printed());
+	}
+
 	public function testStatusDescribesAParameterIdAndAMissingOne()
 	{
 		$app = Prado::getApplication();

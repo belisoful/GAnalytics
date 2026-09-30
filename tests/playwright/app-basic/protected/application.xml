@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<application id="ganalytics-e2e-basic" Mode="Debug">
+	<modules>
+		<module id="security" class="TSecurityManager" ValidationKey="e2e-basic-validation-key-not-a-secret" />
+		<module id="response" class="THttpResponse" HeadersManager="headers" />
+		<module id="headers" class="Prado\Web\HttpHeaders\THttpHeadersManager" ReportOnly="false">
+			<header class="Prado\Web\HttpHeaders\THttpHeaderCsp">
+				<policy Name="default-src">'self' NONCE</policy>
+				<policy Name="style-src">'self' 'unsafe-inline'</policy>
+			</header>
+		</module>
+		<module id="consent" class="belisoful\GAnalytics\GAnalyticsCookieConsentProvider" CookieName="e2e_basic_consent" />
+		<module id="ganalytics" class="belisoful\GAnalytics\GAnalyticsModule" MeasurementId="G-E2EBASIC12" ConsentProvider="consent"
+			ConsentMode="basic" ConsentDefaults='{"analytics_storage": "denied", "ad_storage": "denied"}' />
+	</modules>
+	<services>
+		<service id="page" class="TPageService" DefaultPage="Home" />
+	</services>
+</application>

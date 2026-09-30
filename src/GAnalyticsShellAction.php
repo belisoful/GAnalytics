@@ -159,6 +159,7 @@ class GAnalyticsShellAction extends TShellAction
 			['Data layer', $module->getDataLayerName()],
 			['Enabled modes', \implode(', ', $module->getEnabledModes()) ?: 'all'],
 			['Config options', \json_encode($valid ? $module->getEffectiveConfigOptions() : [], JSON_UNESCAPED_SLASHES)],
+			['Consent mode', $module->getConsentMode() . ($module->getConsentMode() === GAnalyticsModule::CONSENT_MODE_BASIC ? ' (tag after ' . \implode(' or ', $module->getBasicConsentTypes()) . ')' : '')],
 			['Consent defaults', $this->report(fn () => $module->getEffectiveConsentDefaults(), fn (array $defaults) => (string) \json_encode($defaults, JSON_UNESCAPED_SLASHES))],
 			['Consent provider', $this->report(fn () => $module->getConsentProvider(), fn (mixed $provider) => $this->describeObject($provider))],
 			['User id', $module->getUserIdFromUser() ? 'from the application user' : ($module->getUserId() ?? '-')],

@@ -12,7 +12,7 @@
   Use this to find the uncovered branch CI names before adding the test for it; run the full script only when closing out. `composer coverage-paths` is the same run with phpunit's text summary instead of the list.
 - **Native functions are fully qualified** (`\trim()`, `\in_array()`, …; php-cs-fixer's `native_function_invocation`, applied by `composer fix`). PHP 8.4 compiles an unqualified native call in namespaced code to a frameless call guarded by a namespace-fallback check; the fallback is a branch that never executes and shows as uncovered in path coverage. A qualified call compiles to the direct call with no branch.
 - **Live tests**: `composer livetest` (`vendor/bin/phpunit --testsuite live`) talks to a real GA4 property; every test skips without `GA4_MEASUREMENT_ID`, `GA4_API_SECRET`, `GA4_PROPERTY_ID` and `GA4_SERVICE_ACCOUNT_JSON`. CI supplies them as repository secrets on pushes.
-- **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/` and `app-gtm/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
+- **Playwright end-to-end tests**: `npx playwright test --project=chromium` (all browsers: `npx playwright test`); the Playwright config starts `php -S 127.0.0.1:8380 -t tests/playwright`, which serves the `app/`, `app-gtm/` and `app-basic/` PRADO applications. `PW_CHROMIUM=<path>` uses another Chromium binary. Reports land in `build/playwright-report`.
 
 ### Linting and Code Analysis
 - **PHPStan Analysis**: `vendor/bin/phpstan analyse --memory-limit=1G` (or `composer stan`); level 3, `phpVersion` range 8.1 – 8.5
@@ -195,7 +195,7 @@ Docblocks inform and describe; it is not persuasive writing.
 │   └── GAnalyticsShellAction.php           # prado-cli ganalytics/*
 ├── tests/
 │   ├── live/                   # phpunit tests against a real property; namespace belisoful\GAnalytics\Test\Live; skip without GA4_* variables
-│   ├── playwright/             # Browser end-to-end specs, helpers, and the app/ and app-gtm/ PRADO applications they drive
+│   ├── playwright/             # Browser end-to-end specs, helpers, and the app/, app-gtm/ and app-basic/ PRADO applications they drive
 │   ├── test_tools/             # phpunit and phpstan bootstraps
 │   └── unit/                   # phpunit tests and fixtures; namespace belisoful\GAnalytics\Test\Unit (autoload-dev PSR-4)
 │       └── app/                # The minimal application the tests construct

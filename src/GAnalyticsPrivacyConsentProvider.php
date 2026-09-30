@@ -36,7 +36,8 @@ use Prado\TPropertyValue;
  * `CategoryMap` replaces the mapping. An `undecided` category leaves its types out, so
  * `GAnalyticsModule::ConsentDefaults` applies to them: with Google's advanced consent mode the
  * defaults deny them, the tag loads, and Google receives cookieless pings until the visitor
- * decides. For basic consent mode, keep `GAnalyticsModule` disabled until analytics is granted.
+ * decides. With `GAnalyticsModule::ConsentMode="basic"` no tag loads until the visitor grants
+ * `analytics` or `marketing`; a grant by callback loads the tag in place.
  *
  * ```xml
  * <module id="belisoful/prado-privacy" Version="2026-09" />

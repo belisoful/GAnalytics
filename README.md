@@ -225,7 +225,29 @@ public function acceptAnalytics($sender, $param)     // the banner's button
 }
 ```
 
-A consent management module (banner, categories, a consent log) implements `IGAnalyticsConsentProvider` and plugs in the same way; the recommendation for one is in `agents/working/CONSENT_RECOMMENDATION_2026-09-27.md`. For basic consent mode (no tag until consent), keep the module `Enabled="false"` until the choice, or stop `onPreRegisterScript` for undecided visitors.
+A consent management module (banner, categories, a consent log) implements `IGAnalyticsConsentProvider` and plugs in the same way; the recommendation for one is in `agents/working/CONSENT_RECOMMENDATION_2026-09-27.md`.
+
+### Basic and advanced consent mode
+
+`ConsentMode` selects Google's consent mode:
+
+| `ConsentMode` | Before consent | When consent is granted |
+|---|---|---|
+| `advanced` (default) | the tag loads with `ConsentDefaults`; Google receives cookieless pings | `gtag('consent', 'update', …)` |
+| `basic` | no tag, no Google request; queued calls are dropped | the tag loads with the granted state |
+
+```xml
+<module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" ConsentProvider="consent" ConsentMode="basic"
+    ConsentDefaults='{"analytics_storage": "denied", "ad_storage": "denied"}' />
+```
+
+In basic mode the tag waits until one of `BasicConsentTypes` (`analytics_storage, ad_storage` by default) is granted in the effective consent (the provider's state over `ConsentDefaults`). The consent is checked again after the page's events, so:
+
+- a grant during a postback puts the tag on the page that renders;
+- a grant during an ActiveControl callback loads the tag into the page already open: a page without the tag carries a small loader function (`pradoGAnalyticsLoadTag`, no Google code and no request), and the callback calls it with the consent defaults, the `config` calls and the script URL, then runs the queued calls. It needs no `eval`, so it works under a nonce Content Security Policy;
+- a withdrawal on a page that has the tag sends the `denied` update.
+
+Events queued before consent (`trackEvent()`, validation errors, deferred calls) are dropped with a notice. `prado-cli ganalytics/status` shows the mode.
 
 ### With belisoful/prado-privacy
 
@@ -246,7 +268,7 @@ A consent management module (banner, categories, a consent log) implements `IGAn
 | `personalization` | `personalization_storage` |
 | (always) | `security_storage` = `granted` |
 
-An undecided category leaves its types to `ConsentDefaults` (advanced consent mode: denied, the tag loads and sends cookieless pings). `CategoryMap` (a JSON object) replaces the mapping; `ConsentModule` and `AnalyticsModule` name the modules when there are several; `UpdateOnChange="false"` stops the live updates. The provider finds the consent module by its surface (`getConsent()`, `setConsent()`, `onConsentChanged`), so neither package requires the other.
+An undecided category leaves its types to `ConsentDefaults` (advanced consent mode: denied, the tag loads and sends cookieless pings; with `ConsentMode="basic"`, no tag until `analytics` or `marketing` is granted). `CategoryMap` (a JSON object) replaces the mapping; `ConsentModule` and `AnalyticsModule` name the modules when there are several; `UpdateOnChange="false"` stops the live updates. The provider finds the consent module by its surface (`getConsent()`, `setConsent()`, `onConsentChanged`), so neither package requires the other.
 
 ## Events from PHP (Measurement Protocol)
 

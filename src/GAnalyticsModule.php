@@ -96,6 +96,21 @@ use Prado\Xml\TXmlElement;
  * {@see updateConsent()} records the choice. {@see GAnalyticsCookieConsentProvider} is the
  * cookie-backed one.
  *
+ * {@see setConsentMode() ConsentMode} selects Google's consent mode:
+ *
+ * | Mode | Before consent | After consent |
+ * |---|---|---|
+ * | `advanced` (default) | the tag loads with the defaults; Google receives cookieless pings | `gtag('consent', 'update', …)` |
+ * | `basic` | no tag, and queued calls are dropped | the tag loads with the granted state |
+ *
+ * In basic mode the tag waits until one of the {@see setBasicConsentTypes() BasicConsentTypes}
+ * (`analytics_storage`, `ad_storage`) is granted in the effective consent. A choice made during
+ * a postback puts the tag on the page it renders. A page without the tag carries a small loader
+ * function instead ({@see getTagLoaderFunctionScript()}: no Google code, no request), and a choice
+ * made during an ActiveControl callback calls it with the tag's data
+ * ({@see getTagLoaderOptions()}), so the tag loads in place, under a nonce-based Content Security
+ * Policy without `unsafe-eval`, before the queued calls run.
+ *
  * **Server side.** {@see sendEvent()} posts an event over the Measurement Protocol with the
  * {@see setApiSecret() ApiSecret}, under the visitor's `_ga` client id when the request has one
  * ({@see getClientId()}); {@see getMeasurementProtocol()} is the client for batches.
@@ -159,6 +174,18 @@ class GAnalyticsModule extends TPluginModule
 	/** The default `method` parameter of the `login`, `login_failed` and `logout` events. */
 	public const DEFAULT_LOGIN_METHOD = 'form';
 
+	/** Google's advanced consent mode: the tag loads before consent with the defaults. */
+	public const CONSENT_MODE_ADVANCED = 'advanced';
+
+	/** Google's basic consent mode: no tag until consent. */
+	public const CONSENT_MODE_BASIC = 'basic';
+
+	/** The consent types of which one, granted, loads the tag in basic mode. */
+	public const DEFAULT_BASIC_CONSENT_TYPES = ['analytics_storage', 'ad_storage'];
+
+	/** The global function a page without the tag carries in basic mode, and its script key. */
+	public const LOADER_FUNCTION = 'pradoGAnalyticsLoadTag';
+
 	/** The longest GA4 event parameter value, in characters. */
 	public const PARAM_MAX_LENGTH = 100;
 
@@ -213,6 +240,12 @@ class GAnalyticsModule extends TPluginModule
 
 	/** @var array<string, mixed> The `gtag('consent', 'default')` parameters; none when empty. */
 	private array $_consentDefaults = [];
+
+	/** @var string The consent mode: `advanced` or `basic`. */
+	private string $_consentMode = self::CONSENT_MODE_ADVANCED;
+
+	/** @var string[] The consent types of which one, granted, loads the tag in basic mode. */
+	private array $_basicConsentTypes = self::DEFAULT_BASIC_CONSENT_TYPES;
 
 	/** @var ?string The GA4 user id set for the request. */
 	private ?string $_userId = null;
@@ -297,6 +330,9 @@ class GAnalyticsModule extends TPluginModule
 
 	/** @var bool Whether the current page's calls were delivered. */
 	private bool $_flushed = false;
+
+	/** @var bool Whether basic consent mode held the tag back when the page was armed. */
+	private bool $_tagHeld = false;
 
 	// =========================================================================
 	// Lifecycle
@@ -544,7 +580,9 @@ class GAnalyticsModule extends TPluginModule
 	 * neither a Measurement ID nor a container id resolves (a notice is logged), or when a
 	 * handler of {@see onPreRegisterScript} stops the event. Registration waits for
 	 * `onPreRenderComplete` because only then the page knows whether it has a `THead`; a head
-	 * registration on a page without one is refused by PRADO.
+	 * registration on a page without one is refused by PRADO. In basic consent mode without
+	 * consent, the page is armed with the tag held back ({@see getIsConsentGranted()}), so a
+	 * choice made during the request can still load it.
 	 * @param TPage $page The page to put the tag on.
 	 * @throws TInvalidDataValueException When the Measurement ID read from the application parameter is not valid.
 	 * @return bool Whether the tag was armed for the page.
@@ -566,6 +604,7 @@ class GAnalyticsModule extends TPluginModule
 		$page->attachEventHandler('onPreRenderComplete', [$this, 'preRenderCompleteHandler']);
 		$this->_page = $page;
 		$this->_flushed = false;
+		$this->_tagHeld = !$this->getIsConsentGranted();
 		return true;
 	}
 
@@ -606,6 +645,14 @@ class GAnalyticsModule extends TPluginModule
 	 * the tag a second time, so it gets none), tracks failed validators
 	 * ({@see trackValidationErrors()}) with {@see getTrackValidationErrors() TrackValidationErrors},
 	 * and delivers the queued calls ({@see flushCalls()}).
+	 *
+	 * In basic consent mode the consent is checked again here, after the page's events ran:
+	 *
+	 * | Request | Consent granted | Not granted |
+	 * |---|---|---|
+	 * | full page | the tag is registered | the loader function is registered instead; the calls are dropped ({@see dropCalls()}) |
+	 * | callback, tag held back when armed | the loader function loads the tag ({@see getTagLoaderOptions()}) | the calls are dropped |
+	 * | callback, tag on the page | the calls run | the calls run (a withdrawal's update reaches Google) |
 	 * @param mixed $sender The page raising the event.
 	 * @param mixed $param The event parameter.
 	 */
@@ -614,13 +661,125 @@ class GAnalyticsModule extends TPluginModule
 		if (!($sender instanceof TPage)) {
 			return;
 		}
+		$granted = $this->getIsConsentGranted();
 		if (!$sender->getIsCallback()) {
-			$this->registerTag($sender);
+			if ($granted) {
+				$this->registerTag($sender);
+			} else {
+				$this->registerTagLoader($sender);
+			}
+		} elseif ($granted && $this->_tagHeld) {
+			$sender->getCallbackClient()->callClientFunction(static::LOADER_FUNCTION, [$this->getTagLoaderOptions($sender)]);
+			$this->_tagHeld = false;
 		}
 		if ($this->getTrackValidationErrors()) {
 			$this->trackValidationErrors($sender);
 		}
-		$this->flushCalls($sender);
+		if ($granted || ($sender->getIsCallback() && !$this->_tagHeld)) {
+			$this->flushCalls($sender);
+		} else {
+			$this->dropCalls();
+		}
+	}
+
+	/**
+	 * Drops the queued and deferred calls: in basic consent mode, before consent, no data goes to
+	 * Google, and a page without the tag has no `gtag` to run them. A notice is logged.
+	 * @return int The number of calls dropped.
+	 */
+	public function dropCalls(): int
+	{
+		$calls = \array_merge($this->loadDeferredCalls(), $this->_calls);
+		$this->_calls = [];
+		$this->_flushed = true;
+		if (\count($calls) > 0) {
+			Prado::log(\count($calls) . ' gtag calls were dropped: basic consent mode, and the visitor has not consented.', TLogger::NOTICE, static::class);
+		}
+		return \count($calls);
+	}
+
+	/**
+	 * Returns whether the tag may load: always in advanced consent mode; in basic mode, when one of
+	 * the {@see getBasicConsentTypes() BasicConsentTypes} is `granted` in the
+	 * {@see getEffectiveConsentDefaults() effective consent}.
+	 * @return bool Whether the tag may load.
+	 */
+	public function getIsConsentGranted(): bool
+	{
+		if ($this->getConsentMode() !== static::CONSENT_MODE_BASIC) {
+			return true;
+		}
+		$consent = $this->getEffectiveConsentDefaults();
+		foreach ($this->getBasicConsentTypes() as $type) {
+			if (($consent[$type] ?? null) === 'granted') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Registers the loader function ({@see getTagLoaderFunctionScript()}) on a page that renders
+	 * without the tag in basic consent mode: in the head with a `THead`, at the beginning of the
+	 * form without one.
+	 * @param TPage $page The page.
+	 */
+	public function registerTagLoader(TPage $page): void
+	{
+		$cs = $page->getClientScript();
+		if ($page->getHead() !== null) {
+			$cs->registerHeadScript(static::LOADER_FUNCTION, $this->getTagLoaderFunctionScript());
+		} else {
+			$cs->registerBeginScript(static::LOADER_FUNCTION, $this->getTagLoaderFunctionScript());
+		}
+	}
+
+	/**
+	 * Returns the loader function a page without the tag carries in basic consent mode. It holds
+	 * no Google code and makes no request until it is called with {@see getTagLoaderOptions()}:
+	 * then it creates the data layer and the global `gtag`, runs the calls (a `js` call gets the
+	 * current date), marks `gtm.start` for a container, and inserts the script elements.
+	 * @return string The script, without `<script>` tags.
+	 */
+	public function getTagLoaderFunctionScript(): string
+	{
+		return 'window.' . static::LOADER_FUNCTION . '=function(o){var w=window,d=document,l=o.layer,i,c,s;'
+			. 'w[l]=w[l]||[];if(!w.gtag){w.gtag=function(){w[l].push(arguments);};}'
+			. "for(i=0;i<o.calls.length;i++){c=o.calls[i];if(c[0]==='js'){c=['js',new Date()];}w.gtag.apply(w,c);}"
+			. "if(o.gtm){w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});}"
+			. "for(i=0;i<o.scripts.length;i++){s=d.createElement('script');s.async=true;s.src=o.scripts[i];d.head.appendChild(s);}};";
+	}
+
+	/**
+	 * Returns what the loader function needs to load the tag into a page already in the browser:
+	 * the data layer name, the calls of the inline tag script ({@see getTagScript()}: the effective
+	 * consent defaults, `js`, and `config` per id), whether a container starts, and the script URLs.
+	 * @param ?TPage $page The page the tag is for, or null for a page-independent tag.
+	 * @return array{layer: string, calls: array<int, array<int, mixed>>, gtm: bool, scripts: string[]} The loader options.
+	 */
+	public function getTagLoaderOptions(?TPage $page = null): array
+	{
+		$calls = [];
+		$scripts = [];
+		$consent = $this->getEffectiveConsentDefaults();
+		if (\count($consent) > 0) {
+			$calls[] = ['consent', 'default', $consent];
+		}
+		if ($this->getUsesGtag()) {
+			$calls[] = ['js'];
+			$options = $this->getEffectiveConfigOptions($page);
+			$calls[] = \count($options) > 0 ? ['config', (string) $this->getMeasurementId(), $options] : ['config', (string) $this->getMeasurementId()];
+			foreach ($this->getAdditionalMeasurementIds() as $additional) {
+				$calls[] = ['config', $additional];
+			}
+			$scripts[] = $this->getTagScriptUrl();
+		}
+		$gtm = $this->getContainerId() !== null;
+		if ($gtm) {
+			$scripts[] = $this->getContainerUrl() . '?id=' . \rawurlencode((string) $this->getContainerId())
+				. ($this->getDataLayerName() !== static::DEFAULT_DATA_LAYER_NAME ? '&l=' . \rawurlencode($this->getDataLayerName()) : '');
+		}
+		return ['layer' => $this->getDataLayerName(), 'calls' => $calls, 'gtm' => $gtm, 'scripts' => $scripts];
 	}
 
 	/**
@@ -1714,6 +1873,50 @@ class GAnalyticsModule extends TPluginModule
 	public function setConsentDefaults($value)
 	{
 		$this->_consentDefaults = $this->ensureOptions($value, 'ConsentDefaults');
+	}
+
+	/**
+	 * @return string The consent mode: `advanced` (the default) or `basic`.
+	 */
+	public function getConsentMode(): string
+	{
+		return $this->_consentMode;
+	}
+
+	/**
+	 * Sets Google's consent mode. `advanced` loads the tag before consent with the
+	 * {@see getConsentDefaults() ConsentDefaults}; `basic` loads no tag until one of the
+	 * {@see getBasicConsentTypes() BasicConsentTypes} is granted.
+	 * @param mixed $value `advanced` or `basic`.
+	 * @throws TInvalidDataValueException When the value is neither.
+	 */
+	public function setConsentMode($value)
+	{
+		$value = \strtolower(\trim(TPropertyValue::ensureString($value)));
+		if ($value !== static::CONSENT_MODE_ADVANCED && $value !== static::CONSENT_MODE_BASIC) {
+			throw new TInvalidDataValueException('ganalytics_consent_mode_invalid', $value);
+		}
+		$this->_consentMode = $value;
+	}
+
+	/**
+	 * @return string[] The consent types of which one, granted, loads the tag in basic consent mode.
+	 */
+	public function getBasicConsentTypes(): array
+	{
+		return $this->_basicConsentTypes;
+	}
+
+	/**
+	 * Sets the consent types of which one, granted, loads the tag in basic consent mode.
+	 * @param mixed $value Google consent types, comma-separated or an array; empty restores `analytics_storage, ad_storage`.
+	 * @throws TInvalidDataValueException When a value is not a Google consent type.
+	 */
+	public function setBasicConsentTypes($value)
+	{
+		$types = \array_values(\array_filter(\array_map('trim', \is_array($value) ? $value : \explode(',', (string) $value)), fn ($type) => $type !== ''));
+		GAnalyticsCookieConsentProvider::normalizeState(\array_fill_keys($types, 'granted'), true);
+		$this->_basicConsentTypes = $types ?: static::DEFAULT_BASIC_CONSENT_TYPES;
 	}
 
 	/**

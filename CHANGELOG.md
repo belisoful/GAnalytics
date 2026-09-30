@@ -36,6 +36,7 @@ The next release is 0.2.0. It brings the extension to PRADO 4.4 and its current 
 - `config/classMap.json` (the Prado3 short names) and `config/errorMessages.txt` (`ganalytics_*` error codes), both registered by Composer from `extra.prado`.
 - Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
 - `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`.
+- `ConsentMode`: `advanced` (the default) or `basic`. In basic mode no tag loads, no Google request is made and queued calls are dropped until one of `BasicConsentTypes` (`analytics_storage`, `ad_storage`) is granted; a grant during a postback renders the tag, and a grant during a callback loads it in place through a loader function (`getTagLoaderFunctionScript()`, `getTagLoaderOptions()`, `registerTagLoader()`), without `eval`. `getIsConsentGranted()`, `dropCalls()`; `ganalytics/status` shows the mode.
 - `GAnalyticsPrivacyConsentProvider`: binds a consent management module (`TConsentModule` of `belisoful/prado-privacy`, or any module with `getConsent()`, `setConsent()` and `onConsentChanged`) to Consent Mode. Categories map to consent types (`CategoryMap`), undecided categories keep `ConsentDefaults`, each consent change sends `gtag('consent', 'update', …)` (`UpdateOnChange`), and `updateConsent()` calls are written back as choices. `belisoful/prado-privacy` is suggested, not required.
 
 ### Changed

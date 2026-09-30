@@ -1587,6 +1587,138 @@ class GAnalyticsModuleTest extends TestCase
 	}
 
 	// =========================================================================
+	// Basic consent mode
+	// =========================================================================
+
+	public function testConsentModeProperties()
+	{
+		$module = $this->module();
+		self::assertSame(GAnalyticsModule::CONSENT_MODE_ADVANCED, $module->getConsentMode());
+		self::assertSame(GAnalyticsModule::DEFAULT_BASIC_CONSENT_TYPES, $module->getBasicConsentTypes());
+		self::assertTrue($module->getIsConsentGranted(), 'advanced mode never holds the tag back');
+		$module->setConsentMode(' BASIC ');
+		self::assertSame(GAnalyticsModule::CONSENT_MODE_BASIC, $module->getConsentMode());
+		self::assertFalse($module->getIsConsentGranted());
+		$module->setBasicConsentTypes(' analytics_storage ,, ');
+		self::assertSame(['analytics_storage'], $module->getBasicConsentTypes());
+		$module->setBasicConsentTypes(['ad_storage', 'ad_user_data']);
+		self::assertSame(['ad_storage', 'ad_user_data'], $module->getBasicConsentTypes());
+		$module->setBasicConsentTypes('');
+		self::assertSame(GAnalyticsModule::DEFAULT_BASIC_CONSENT_TYPES, $module->getBasicConsentTypes());
+		try {
+			$module->setBasicConsentTypes('cookie_storage');
+			self::fail('An unknown consent type is refused.');
+		} catch (TInvalidDataValueException $e) {
+			self::assertSame('ganalytics_consent_invalid', $e->getErrorCode());
+		}
+		$this->expectException(TInvalidDataValueException::class);
+		$module->setConsentMode('strict');
+	}
+
+	public function testBasicModeHoldsTheTagAndDropsCallsBeforeConsent()
+	{
+		$module = $this->probe();
+		$module->setConsentMode('basic');
+		$module->setConsentDefaults(['analytics_storage' => 'denied', 'ad_storage' => 'denied']);
+		$module->store[GAnalyticsModule::SESSION_KEY] = [['event', 'deferred_login']];
+		$page = new TPage();
+		self::assertTrue($module->registerPageScripts($page), 'the page is armed with the tag held back');
+		$module->trackEvent('page_event');
+		$module->preRenderCompleteHandler($page, null);
+		$cs = $page->getClientScript();
+		self::assertFalse($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY), 'no tag before consent');
+		self::assertFalse($cs->isScriptFileRegistered(GAnalyticsModule::SCRIPT_KEY));
+		self::assertTrue($cs->isBeginScriptRegistered(GAnalyticsModule::LOADER_FUNCTION), 'the loader function waits in its place');
+		$headed = new HeadedPage();
+		$headed->attachHead();
+		$module->registerPageScripts($headed);
+		$module->preRenderCompleteHandler($headed, null);
+		self::assertTrue($headed->getClientScript()->isHeadScriptRegistered(GAnalyticsModule::LOADER_FUNCTION));
+		self::assertStringNotContainsString('googletagmanager', $module->getTagLoaderFunctionScript(), 'the loader holds no Google URL');
+		self::assertFalse($cs->isEndScriptRegistered(GAnalyticsModule::CALLS_SCRIPT_KEY), 'no calls without a tag');
+		self::assertSame([], $module->deferred(), 'the deferred calls are dropped too');
+		self::assertSame(0, $module->dropCalls(), 'nothing left');
+	}
+
+	public function testBasicModeLoadsTheTagWhenConsentIsGrantedDuringAPostback()
+	{
+		$module = $this->probe();
+		$module->setConsentMode('basic');
+		$consent = new FakeConsentModule();
+		$module->setConsentProvider($consent);
+		$page = new TPage();
+		$module->registerPageScripts($page);
+		$consent->state = ['analytics_storage' => 'granted'];
+		$module->updateConsent(['analytics_storage' => 'granted']);
+		$module->preRenderCompleteHandler($page, null);
+		$cs = $page->getClientScript();
+		self::assertTrue($cs->isBeginScriptRegistered(GAnalyticsModule::SCRIPT_KEY), 'the page rendered after the choice carries the tag');
+		self::assertTrue($cs->isEndScriptRegistered(GAnalyticsModule::CALLS_SCRIPT_KEY));
+	}
+
+	public function testBasicModeLoadsTheTagThroughACallback()
+	{
+		$module = $this->probe();
+		$module->setConsentMode('basic');
+		$consent = new FakeConsentModule();
+		$module->setConsentProvider($consent);
+		$page = new CallbackPage();
+		$module->registerPageScripts($page);
+		$consent->state = ['ad_storage' => 'granted'];
+		$module->updateConsent(['ad_storage' => 'granted']);
+		$module->preRenderCompleteHandler($page, null);
+		$actions = $page->client->getClientFunctionsToExecute();
+		self::assertSame([
+			[GAnalyticsModule::LOADER_FUNCTION => [[
+				'layer' => 'dataLayer',
+				'calls' => [['consent', 'default', ['ad_storage' => 'granted']], ['js'], ['config', 'G-TEST1234AB']],
+				'gtm' => false,
+				'scripts' => ['https://www.googletagmanager.com/gtag/js?id=G-TEST1234AB'],
+			]]],
+			['gtag' => ['consent', 'update', ['ad_storage' => 'granted']]],
+		], $actions, 'the tag loads, then the update runs');
+	}
+
+	public function testBasicModeCallbackWithoutConsentDropsAndWithTheTagDelivers()
+	{
+		$module = $this->probe();
+		$module->setConsentMode('basic');
+		$consent = new FakeConsentModule();
+		$module->setConsentProvider($consent);
+		$held = new CallbackPage();
+		$module->registerPageScripts($held);
+		$module->trackEvent('clicked');
+		$module->preRenderCompleteHandler($held, null);
+		self::assertSame([], $held->client->getClientFunctionsToExecute(), 'no consent, no tag, no calls');
+
+		$consent->state = ['analytics_storage' => 'granted'];
+		$loaded = new CallbackPage();
+		$module->registerPageScripts($loaded);
+		$consent->state = ['analytics_storage' => 'denied'];
+		$module->updateConsent(['analytics_storage' => 'denied']);
+		$module->preRenderCompleteHandler($loaded, null);
+		self::assertSame([['gtag' => ['consent', 'update', ['analytics_storage' => 'denied']]]], $loaded->client->getClientFunctionsToExecute(), 'a withdrawal reaches the tag already on the page');
+	}
+
+	public function testTagLoaderOptions()
+	{
+		$module = $this->module(null);
+		$module->setContainerId('GTM-ABC1234');
+		self::assertSame(['layer' => 'dataLayer', 'calls' => [], 'gtm' => true, 'scripts' => ['https://www.googletagmanager.com/gtm.js?id=GTM-ABC1234']], $module->getTagLoaderOptions());
+		$module->setMeasurementId('G-TEST1234AB');
+		$module->setAdditionalMeasurementIds('AW-12345');
+		$module->setDataLayerName('layer2');
+		$module->setConfigOptions(['send_page_view' => false]);
+		$module->setConsentDefaults(['ad_storage' => 'denied']);
+		self::assertSame([
+			'layer' => 'layer2',
+			'calls' => [['consent', 'default', ['ad_storage' => 'denied']], ['js'], ['config', 'G-TEST1234AB', ['send_page_view' => false]], ['config', 'AW-12345']],
+			'gtm' => true,
+			'scripts' => ['https://www.googletagmanager.com/gtag/js?id=G-TEST1234AB&l=layer2', 'https://www.googletagmanager.com/gtm.js?id=GTM-ABC1234&l=layer2'],
+		], $module->getTagLoaderOptions());
+	}
+
+	// =========================================================================
 	// Lifecycle
 	// =========================================================================
 

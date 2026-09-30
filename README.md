@@ -11,6 +11,7 @@ Google Analytics 4 for the [PRADO PHP Framework](https://github.com/pradosoft/pr
 | `GAnalyticsAdminApi` | The Admin API: accounts, properties, data streams, Measurement Protocol secrets |
 | `IGAnalyticsCredentials`, `GAnalyticsServiceAccountCredentials`, `GAnalyticsAccessTokenCredentials` | The token seam for the APIs: a service account JWT flow, or a token from elsewhere |
 | `IGAnalyticsConsentProvider`, `IGAnalyticsConsentStore`, `GAnalyticsCookieConsentProvider` | The consent seam and a cookie-backed store |
+| `GAnalyticsPrivacyConsentProvider` | The binding to a consent management module (`belisoful/prado-privacy`) |
 | `GAnalyticsShellAction` | `prado-cli ganalytics/status`, `send`, `validate`, `report`, `realtime`, `properties` |
 | `GAnalyticsApiException` | A Google API refusal, with the status and Google's message |
 
@@ -225,6 +226,27 @@ public function acceptAnalytics($sender, $param)     // the banner's button
 ```
 
 A consent management module (banner, categories, a consent log) implements `IGAnalyticsConsentProvider` and plugs in the same way; the recommendation for one is in `agents/working/CONSENT_RECOMMENDATION_2026-09-27.md`. For basic consent mode (no tag until consent), keep the module `Enabled="false"` until the choice, or stop `onPreRegisterScript` for undecided visitors.
+
+### With belisoful/prado-privacy
+
+[belisoful/prado-privacy](https://github.com/belisoful/prado-privacy) supplies the banner, the preferences, the consent log, regions and Global Privacy Control. `GAnalyticsPrivacyConsentProvider` binds its `TConsentModule` to Consent Mode: the visitor's categories set the page's consent defaults, and every change (banner, preferences, withdrawal) sends `gtag('consent', 'update', …)` on the same page or callback, with no analytics code in the banner.
+
+```xml
+<module id="belisoful/prado-privacy" Version="2026-09" />
+<module id="privacy-analytics" class="belisoful\GAnalytics\GAnalyticsPrivacyConsentProvider" />
+<module id="belisoful/ganalytics" MeasurementId="G-XXXXXXXXXX" ConsentProvider="privacy-analytics"
+    ConsentDefaults='{"analytics_storage": "denied", "ad_storage": "denied", "ad_user_data": "denied", "ad_personalization": "denied"}' />
+```
+
+| Consent category | Google consent types |
+|---|---|
+| `analytics` | `analytics_storage` |
+| `marketing` | `ad_storage`, `ad_user_data`, `ad_personalization` |
+| `functional` | `functionality_storage` |
+| `personalization` | `personalization_storage` |
+| (always) | `security_storage` = `granted` |
+
+An undecided category leaves its types to `ConsentDefaults` (advanced consent mode: denied, the tag loads and sends cookieless pings). `CategoryMap` (a JSON object) replaces the mapping; `ConsentModule` and `AnalyticsModule` name the modules when there are several; `UpdateOnChange="false"` stops the live updates. The provider finds the consent module by its surface (`getConsent()`, `setConsent()`, `onConsentChanged`), so neither package requires the other.
 
 ## Events from PHP (Measurement Protocol)
 

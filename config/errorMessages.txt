@@ -22,3 +22,4 @@ ganalytics_class_invalid					= Class '{0}' is not a {1}.
 ganalytics_consent_invalid					= Consent type '{0}' with value '{1}' is not valid; expected a Google consent type set to 'granted' or 'denied'.
 ganalytics_cookiename_invalid				= Cookie name '{0}' is not valid.
 ganalytics_expires_invalid					= Cookie life '{0}' is not valid; expected at least 1 day.
+ganalytics_category_map_invalid				= Category map '{0}' is not valid; expected a JSON object of category => Google consent type or types.

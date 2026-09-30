@@ -48,7 +48,8 @@
 	"suggest": {
 		"ext-openssl": "Signing the service account JWT for the Data API and Admin API (GAnalyticsServiceAccountCredentials).",
 		"belisoful/prado-webhooks": "Pushing realtime figures from pollRealtime() to other systems; the Data API itself is pull-only.",
-		"belisoful/prado-websocket": "Pushing realtime figures from pollRealtime() to browsers."
+		"belisoful/prado-websocket": "Pushing realtime figures from pollRealtime() to browsers.",
+		"belisoful/prado-privacy": "Consent management (banner, preferences, consent log, regions, Global Privacy Control) driving Consent Mode through GAnalyticsPrivacyConsentProvider."
 	},
 	"require-dev": {
 		"phpunit/phpunit": "^10",

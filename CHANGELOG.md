@@ -5,18 +5,7 @@ All notable changes to `belisoful/ganalytics` are recorded here. The format foll
 
 ## [Unreleased]
 
-### Fixed
-- `queueCall()` (and `trackEvent()`, `updateConsent()`, `setUserProperties()`, `gtag()`) drops a call with a notice while the module is inactive or has no tag, instead of deferring it to the session forever and opening a session for every visitor.
-- `getContainerNoScriptHtml()` builds the `ns.html` URL from the `ContainerUrl` origin and directory, so a host-only URL, a trailing slash or a port no longer yield a broken frame source.
-- `amendCspHeader()` drops a `'none'` token from a directive it adds sources to; `'none'` beside a source is an invalid policy.
-- `GAnalyticsServiceAccountCredentials` shares one application-cache token whether the key is set by `KeyFile` or by `Key`: the cache key is the account's `client_email`.
-- `ganalytics/status` reports an unresolvable `ConsentProvider` or `Credentials` in its own row instead of aborting the report.
-- The string `'0'` is a value, not an empty one, for `UserId`, `ApiSecret`, `AccessToken`, `Key`, the endpoints and the other optional properties (`TPropertyValue::ensureNullIf()` with `FILTER_EMPTY`).
-- The configuration examples resolve `KeyFile` against the application's base path (`protected`), so `KeyFile="ga4-key.json"` names `protected/ga4-key.json`.
-
-## [1.0.0] - 2026-09-26
-
-This release brings the extension to PRADO 4.4 and its current extension conventions, and lands the audit recorded in `agents/working/AUDIT_2026-09-26.md`. It changes the package requirements and some behavior; see [Upgrading from 0.0.1](#upgrading-from-001).
+The next release is 0.2.0. It brings the extension to PRADO 4.4 and its current extension conventions, and lands the audit recorded in `agents/working/AUDIT_2026-09-26.md`. It changes the package requirements and some behavior; see [Upgrading from 0.0.1](#upgrading-from-001).
 
 ### Added
 - `Enabled`: `false` leaves every page without the tag.
@@ -45,8 +34,9 @@ This release brings the extension to PRADO 4.4 and its current extension convent
 - A page without a `THead` receives the tag at the beginning of its form.
 - A module loaded after the application initialized (a lazy module) hooks the running page service at once.
 - `config/classMap.json` (the Prado3 short names) and `config/errorMessages.txt` (`ganalytics_*` error codes), both registered by Composer from `extra.prado`.
-- Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`, 192 tests), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
+- Unit tests (`tests/unit`, namespace `belisoful\GAnalytics\Test\Unit`), phpstan (level 3), php-cs-fixer, and CI on PHP 8.1 to 8.5 against PRADO `master`.
 - `CHANGELOG.md`, `AGENTS.md`, `CLAUDE.md`.
+- `GAnalyticsPrivacyConsentProvider`: binds a consent management module (`TConsentModule` of `belisoful/prado-privacy`, or any module with `getConsent()`, `setConsent()` and `onConsentChanged`) to Consent Mode. Categories map to consent types (`CategoryMap`), undecided categories keep `ConsentDefaults`, each consent change sends `gtag('consent', 'update', …)` (`UpdateOnChange`), and `updateConsent()` calls are written back as choices. `belisoful/prado-privacy` is suggested, not required.
 
 ### Changed
 - Requires PHP 8.1+ and PRADO `^4.4@dev`. The bootstrap class is declared under `extra.prado.bootstrap`.
@@ -63,6 +53,13 @@ This release brings the extension to PRADO 4.4 and its current extension convent
 - A page ran with `gtag('config', '')` and a `gtag/js?id=` script when no Measurement ID was configured; it now runs without the tag and a notice is logged.
 - The Measurement ID read from the application parameter was cached into the module on first use, so a later parameter change, or clearing the property, had no effect; `getMeasurementId()` is now side-effect free.
 - The class docblock configured the module by a nonexistent id (`belisoful/GAnalyticsModule`); the examples show the package name and the class.
+- `queueCall()` (and `trackEvent()`, `updateConsent()`, `setUserProperties()`, `gtag()`) drops a call with a notice while the module is inactive or has no tag, instead of deferring it to the session forever and opening a session for every visitor.
+- `getContainerNoScriptHtml()` builds the `ns.html` URL from the `ContainerUrl` origin and directory, so a host-only URL, a trailing slash or a port no longer yield a broken frame source.
+- `amendCspHeader()` drops a `'none'` token from a directive it adds sources to; `'none'` beside a source is an invalid policy.
+- `GAnalyticsServiceAccountCredentials` shares one application-cache token whether the key is set by `KeyFile` or by `Key`: the cache key is the account's `client_email`.
+- `ganalytics/status` reports an unresolvable `ConsentProvider` or `Credentials` in its own row instead of aborting the report.
+- The string `'0'` is a value, not an empty one, for `UserId`, `ApiSecret`, `AccessToken`, `Key`, the endpoints and the other optional properties (`TPropertyValue::ensureNullIf()` with `FILTER_EMPTY`).
+- The configuration examples resolve `KeyFile` against the application's base path (`protected`), so `KeyFile="ga4-key.json"` names `protected/ga4-key.json`.
 
 ### Upgrading from 0.0.1
 - **PRADO 4.4 and PHP 8.1** are required.
@@ -76,5 +73,5 @@ This release brings the extension to PRADO 4.4 and its current extension convent
 ### Added
 - Initial release: `GAnalyticsModule`, a `TPluginModule` that registers the gtag.js script and configuration in every page head, with the Measurement ID from the module or the `GoogleAnalyticsMeasurementId` application parameter.
 
-[1.0.0]: https://github.com/belisoful/GAnalytics/compare/v0.0.1...v1.0.0
+[Unreleased]: https://github.com/belisoful/GAnalytics/compare/v0.0.1...HEAD
 [0.0.1]: https://github.com/belisoful/GAnalytics/releases/tag/v0.0.1

@@ -60,7 +60,7 @@
   - `@method` for dynamic events with prefix 'dy-'; which are called (on "$this->dy-") but not defined.
 - Inline comments should be in English and start with `//`
 - Use `?` for single nullable types and in doc blocks
-- `@since`: symbols released through v1.0.0 carry none; a public symbol added after v1.0.0 gets `@since` with the version it ships in.
+- `@since`: symbols released through 0.2.0 carry none; a public symbol added after 0.2.0 gets `@since` with the version it ships in.
 - Method Doc Blocks must be **tight**, and have at minimum one sentence in the description.
 - Documentation additions/changes/removals should be integrated into the whole, at each level (of detail).
 
@@ -131,11 +131,11 @@ Docblocks inform and describe; it is not persuasive writing.
 - UI Portlets are PHP classes with a ".tpl" TTemplate file with the same base name
 - Head scripts (`registerHeadScriptFile`/`registerHeadScript`) render only through `THead`; form scripts (`registerScriptFile`/`registerBeginScript`/`registerEndScript`) render in the form, and begin scripts also render in a callback response. Time is read through PRADO's clock seam (`TApplicationClockAwareTrait`), never `time()` directly.
 - Logging goes through `Prado::log()` with `\Prado\Util\Log\TLogger` levels (the logger moved to `Prado\Util\Log` in PRADO 4.4).
-- The public API is published (v1.0.0 onward): prefer compatible changes, and document any breaking change under "Upgrading" in `CHANGELOG.md`
+- The public API is settling for 0.2.0: prefer compatible changes, and document any breaking change under "Upgrading" in `CHANGELOG.md`
 - Record every user-visible change under `## [Unreleased]` in `CHANGELOG.md` (Keep a Changelog format) as it lands
 - A full check consists of the 4 checks (in order): `php -l` compile, php-cs-fixer, phpstan, phpunit (all checks must pass successfully); before a release, `composer coverage-branches` with no unexecuted branch and `npx playwright test --project=chromium`
 - A full check must be done for code to be ready for git commit.
-- The current version of this extension is **v1.0.0** (released 2026-09-26). It targets PRADO 4.4+ (the `pradosoft/prado` `master` branch, aliased `4.4.x-dev`). Release history and upgrade notes are in `CHANGELOG.md`.
+- The current version of this extension is **v0.1.0**; the work on `main` is the next release, **0.2.0** (unreleased). It targets PRADO 4.4+ (the `pradosoft/prado` `master` branch, aliased `4.4.x-dev`). Release history and upgrade notes are in `CHANGELOG.md`.
 - This extension namespaces its class under `belisoful\GAnalytics` (PSR-4 → `src/`); extensions do NOT update the framework's `classes.php`. The Prado3 short class name is supplied via `config/classMap.json`, registered by Composer from `composer.json` `extra.prado.class-map`. The bootstrap module is `extra.prado.bootstrap`, so `<module id="belisoful/ganalytics"/>` configures it without a class.
 - Error codes (keys) and their messages live in `config/errorMessages.txt`, registered by Composer from `composer.json` `extra.prado.error-messages`; the framework's `messages.txt` is not used. `TPluginModule` also looks for an `errorMessages.txt` next to the module class (`src/`); this extension keeps the file under `config/` and relies on Composer.
 
@@ -190,7 +190,7 @@ Docblocks inform and describe; it is not persuasive writing.
 │   ├── GAnalyticsAdminApi.php              # Admin API v1beta
 │   ├── GAnalyticsApiException.php          # A Google API refusal
 │   ├── IGAnalyticsCredentials.php          # Token seam; GAnalyticsServiceAccountCredentials.php, GAnalyticsAccessTokenCredentials.php
-│   ├── IGAnalyticsConsentProvider.php      # Consent seam; IGAnalyticsConsentStore.php, GAnalyticsCookieConsentProvider.php
+│   ├── IGAnalyticsConsentProvider.php      # Consent seam; IGAnalyticsConsentStore.php, GAnalyticsCookieConsentProvider.php, GAnalyticsPrivacyConsentProvider.php (prado-privacy binding)
 │   ├── GAnalyticsHttpTransportTrait.php    # The one HTTP transport seam
 │   └── GAnalyticsShellAction.php           # prado-cli ganalytics/*
 ├── tests/

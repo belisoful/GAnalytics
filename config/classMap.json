@@ -12,5 +12,6 @@
 	"GAnalyticsServiceAccountCredentials": "belisoful\\GAnalytics\\GAnalyticsServiceAccountCredentials",
 	"IGAnalyticsConsentProvider": "belisoful\\GAnalytics\\IGAnalyticsConsentProvider",
 	"IGAnalyticsConsentStore": "belisoful\\GAnalytics\\IGAnalyticsConsentStore",
-	"GAnalyticsCookieConsentProvider": "belisoful\\GAnalytics\\GAnalyticsCookieConsentProvider"
+	"GAnalyticsCookieConsentProvider": "belisoful\\GAnalytics\\GAnalyticsCookieConsentProvider",
+	"GAnalyticsPrivacyConsentProvider": "belisoful\\GAnalytics\\GAnalyticsPrivacyConsentProvider"
 }
